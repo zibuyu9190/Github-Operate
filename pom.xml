@@ -35,6 +35,8 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<!-- 显式标注与父 POM 相同的版本，便于 IDEA 解析插件坐标。 -->
+				<version>4.1.1</version>
 			</plugin>
 		</plugins>
 	</build>
