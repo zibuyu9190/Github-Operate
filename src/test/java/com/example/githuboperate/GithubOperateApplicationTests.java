@@ -23,11 +23,12 @@ class GithubOperateApplicationTests {
 	private MockMvc mockMvc;
 
 	@Test
-	void shouldReturnInitialGreeting() throws Exception {
+	void shouldReturnGreetingWithTeam() throws Exception {
 		mockMvc.perform(get("/api/greeting"))
 				.andExpect(status().isOk())
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-				.andExpect(jsonPath("$.message").value("欢迎学习 Git 分支合并！"));
+				.andExpect(jsonPath("$.message").value("欢迎学习 Git 分支合并！"))
+				.andExpect(jsonPath("$.team").value("后端团队"));
 	}
 
 }
