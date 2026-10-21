@@ -12,11 +12,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class GreetingController {
 
 	/**
-	 * 返回固定的初始问候语，作为两个分支共同的开发起点。
+	 * 返回问候语与负责团队，便于调用方识别服务归属。
 	 */
 	@GetMapping("/api/greeting")
 	public Map<String, String> greeting() {
-		return Map.of("message", "欢迎学习 Git 分支合并！");
+		return Map.of("message", "欢迎学习 Git 分支合并！", "team", "后端团队");
 	}
 
 }
