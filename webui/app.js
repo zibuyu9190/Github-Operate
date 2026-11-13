@@ -44,10 +44,16 @@
     lessonView.update(lesson, assistContext().state, dirty);
   }
 
-  /** 用户输入只进入 textContent、value 或 SVG 文本节点，不拼接 HTML。 */
-  function terminalEntry(command, output, type = '') {
+  /** 命令状态取自实际执行结果；用户文本只进入文本节点，不拼接 HTML。 */
+  function terminalEntry(command, output, result = null) {
     const entry = node('div', 'terminal-entry');
-    entry.append(node('div', 'terminal-command', command), node('pre', 'terminal-output ' + type, output));
+    const commandLine = node('div', 'terminal-command', command);
+    const type = !result ? '' : !result.ok ? 'terminal-error' : result.conflict ? 'terminal-conflict' : '';
+    if (result) {
+      const status = !result.ok ? ['error', '✕ 失败'] : result.conflict ? ['conflict', '⚠ 待解决冲突'] : ['success', '✓ 成功'];
+      commandLine.append(node('span', 'terminal-command-status terminal-command-' + status[0], status[1]));
+    }
+    entry.append(commandLine, node('pre', 'terminal-output ' + type, output));
     $('terminal').append(entry);
     while ($('terminal').children.length > 80) $('terminal').firstElementChild.remove();
     $('terminal').scrollTop = $('terminal').scrollHeight;
@@ -218,7 +224,7 @@
     history.push(input); historyIndex = history.length; draft = '';
     const result = sim.execute(input);
     lesson.record(result);
-    terminalEntry('$ ' + input, result.output, !result.ok ? 'terminal-error' : result.conflict ? 'terminal-conflict' : '');
+    terminalEntry('$ ' + input, result.output, result);
     $('command').value = ''; assistant.refresh(false); message(); dirty = false; render(result.ok); updateExplanation(result, input);
     if (result.ok) { lastResult = result; $('replay').disabled = false; }
     if (result.ok && result.conflict) { selectedFile = sim.state.pending.unresolved[0]; renderFiles(); }

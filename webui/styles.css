@@ -10,3 +10,15 @@
 .work-diff{border-top:1px solid #edf2ef;font-size:9px;color:#809b8d}.work-diff summary{cursor:pointer;padding:7px 15px}.work-diff .code-view{height:110px;min-height:70px;background:#f8fcfa}
 .sidebar{min-width:0}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* 历史命令保留执行时的结果，符号与文字同时区分成功、失败和冲突。 */
+.terminal-command-status {
+  display: inline-block;
+  margin-left: 10px;
+  white-space: nowrap;
+  font-size: .95em;
+}
+
+.terminal-command-success { color: #6ee7b7; }
+.terminal-command-error { color: #f87171; }
+.terminal-command-conflict { color: #fbbf24; }
