@@ -32,6 +32,8 @@
 - 冲突发生后，编辑工作区中的冲突标记，保存并 `git add`，然后使用对应的 `--continue`；`--abort` 恢复操作前状态。`add` 与真实 Git 一样会标记冲突已解决，即使文件中还留有标记，请自行检查。
 - “模拟他人提交”只推进虚拟远程。对比远程实际状态与本地 `origin/main`，再尝试 fetch、pull、push。普通 pull 在练习中默认配置为 merge。
 - 点击提交节点查看快照；“重播变化”只回放图形，不会重复执行命令。支持命令历史上下键、节点键盘访问、窄屏布局及系统减少动画偏好。
+- 命令行支持命令、选项、文件名、分支和提交引用补全。输入时按 `Tab` 填入首个候选，或用 `↑ ↓` 选择后按 `Enter` 确认，再按 `Enter` 执行；`Esc` 关闭候选，`Ctrl+Space` 手动唤出。候选关闭时 `↑ ↓` 仍浏览历史命令，中文输入法选字期间不会触发补全。
+- “接下来可以试试”会根据工作区、暂存区、冲突与远程状态推荐下一步，并说明原因。点击只填入命令；提交说明可直接修改，命令始终由你确认执行。
 
 ### 支持的命令
 
@@ -55,7 +57,7 @@
 在项目根目录使用 Node.js 22 或更新版本运行独立网页测试：
 
 ```powershell
-node --test webui/tests/simulator.test.cjs webui/tests/graph.test.cjs webui/tests/git-reference.test.cjs
+node --test webui/tests/*.test.cjs
 ```
 
 真实 Git 对照测试还需要本机 `git` 命令；仅在 `target/webui-validation/` 中创建并清理独立临时仓库与本地裸仓库，比较文件、暂存区、引用和父子拓扑，不连接网络，也不修改开发仓库。网页本身不需要 Node.js 或 Git。

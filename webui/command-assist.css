@@ -1,0 +1,23 @@
+/* 独立扩展样式，沿用当前工作台和旧版离线页面的布局。 */
+#command-form { position: relative; }
+.command-completions {
+  position: absolute; z-index: 30; bottom: calc(100% - 2px); left: 10px; right: 10px;
+  max-height: min(280px, 44vh); overflow: auto; padding: 5px;
+  background: #fff; color: #0f172a; border: 1px solid #94a3b8; border-radius: 9px;
+  box-shadow: 0 -5px 24px #0f172a26; scrollbar-width: thin;
+}
+.completion-option {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px;
+  padding: 7px 9px; border-radius: 5px; cursor: pointer; border: 1px solid transparent;
+}
+.completion-option:hover, .completion-option[aria-selected="true"] { background: #ecfdf5; border-color: #6ee7b7; }
+.completion-option code { font: 600 12px/1.4 var(--mono, monospace); overflow-wrap: anywhere; }
+.completion-option small { grid-column: 1 / -1; color: #475569; font-size: 11px; line-height: 1.4; }
+.completion-kind { align-self: start; color: #047857; font-size: 10px; }
+.completion-tip { position: sticky; bottom: -5px; padding: 6px 4px 2px; background: #fff; color: #64748b; font-size: 10px; }
+.command-assist-hint { padding-top: 5px; color: #64748b; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+#quick-commands .recommended-command { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; white-space: normal; width: 100%; min-width: 0; }
+.recommended-command code { font: 600 11px/1.4 var(--mono, monospace); overflow-wrap: anywhere; }
+.recommended-command small { color: #64748b; font: 10px/1.4 var(--sans, sans-serif); }
+.workbench .recommended-command small, .workbench .command-assist-hint, .workbench .suggestions .small-label > span { color: #94a3b8; }
+@media (max-width: 700px) { .command-completions { left: 6px; right: 6px; max-height: 200px; } }

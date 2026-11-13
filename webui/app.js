@@ -6,7 +6,36 @@
   const sim = new Simulator();
   let selectedFile = 'hello.txt', selectedCommit = null, dirty = false, history = [], historyIndex = 0, draft = '', lastResult = null, replayTimer = null;
   const graph = new CommitGraph($('graph'), showCommit);
+  const assistant = new GitCommandAssist.Controller($('command'), assistContext);
   const labels = ['编辑与提交', '分叉与汇合', '解决同一行冲突', '改变提交的基点', '理解三种模式', '本地与远程同步'];
+
+  /** 草稿也参与下一步推荐，但读取建议本身不会保存文件或改变虚拟仓库。 */
+  function assistContext() {
+    const files = sim.fileStatus().map(file => ({ ...file }));
+    let state = sim.state;
+    if (dirty && selectedFile) {
+      const file = files.find(file => file.path === selectedFile);
+      if (file) file.unstaged = $('file-editor').value !== sim.state.index[selectedFile];
+      state = { ...sim.state, work: { ...sim.state.work, [selectedFile]: $('file-editor').value } };
+    }
+    return { state, files, scene: sim.scene };
+  }
+
+  function renderRecommendations() {
+    const rows = GitCommandAssist.recommend(assistContext());
+    $('quick-commands').replaceChildren(...rows.map(({ command, description }) => {
+      const button = node('button', 'command-chip recommended-command'); button.type = 'button';
+      button.append(node('code', '', command), node('small', '', description));
+      button.addEventListener('click', () => {
+        fillCommand(command);
+        const message = command.indexOf('说明本次修改');
+        if (message >= 0) $('command').setSelectionRange(message, message + '说明本次修改'.length);
+      });
+      return button;
+    }));
+    const title = document.querySelector('.suggestions .small-label');
+    title.replaceChildren(document.createTextNode('接下来可以试试 '), node('span', '', '按当前仓库状态推荐 · 点击填入'));
+  }
 
   /** 用户输入只进入 textContent、value 或 SVG 文本节点，不拼接 HTML。 */
   function terminalEntry(command, output, type = '') {
@@ -22,6 +51,7 @@
   function fillCommand(command) {
     $('command').value = command; $('command').focus();
     $('command').setSelectionRange(command.length, command.length);
+    assistant.refresh(false);
   }
 
   function commandButton(command) {
@@ -37,11 +67,10 @@
     $('scene-number').textContent = 'EXPERIMENT ' + String(index + 1).padStart(2, '0') + ' / 06';
     $('scene-title').textContent = info.title; $('scene-subtitle').textContent = info.subtitle;
     document.querySelectorAll('.scene-button').forEach(button => { const active = button.dataset.scene === scene; button.classList.toggle('active', active); button.setAttribute('aria-current', active ? 'page' : 'false'); });
-    $('quick-commands').replaceChildren(...info.commands.map(commandButton));
     $('terminal').replaceChildren(node('div', 'welcome-title', '欢迎来到 ' + info.title + '。'), node('p', 'terminal-welcome', info.hint));
     $('explanation-title').textContent = '观察起点，再试一条命令'; $('explanation').textContent = info.hint;
     $('flow').replaceChildren(); $('command').value = ''; $('commit-detail').open = false; $('commit-summary').textContent = '选择一个提交，查看它的文件快照'; $('commit-content').replaceChildren();
-    $('replay').disabled = true; $('new-file-form').hidden = true; message(); render();
+    $('replay').disabled = true; $('new-file-form').hidden = true; assistant.refresh(false); message(); render();
   }
 
   function render(animate = false) {
@@ -117,6 +146,7 @@
       $('conflict-base').textContent = conflict.base ?? '（此版本没有该文件）'; $('conflict-ours').textContent = conflict.ours ?? '（此版本删除了文件）'; $('conflict-theirs').textContent = conflict.theirs ?? '（此版本删除了文件）';
     }
     renderCode($('work-diff'), work, index, true);
+    renderRecommendations();
   }
 
   function showCommit(commit, remoteOnly, expand = true) {
@@ -167,7 +197,7 @@
     history.push(input); historyIndex = history.length; draft = '';
     const result = sim.execute(input);
     terminalEntry('$ ' + input, result.output, !result.ok ? 'terminal-error' : result.conflict ? 'terminal-conflict' : '');
-    $('command').value = ''; message(); dirty = false; render(result.ok); updateExplanation(result, input);
+    $('command').value = ''; assistant.refresh(false); message(); dirty = false; render(result.ok); updateExplanation(result, input);
     if (result.ok) { lastResult = result; $('replay').disabled = false; }
     if (result.ok && result.conflict) { selectedFile = sim.state.pending.unresolved[0]; renderFiles(); }
     if (result.ok && result.command.name !== 'log') requestAnimationFrame(() => { $('graph-stage').scrollTop = $('graph-stage').scrollHeight; });
@@ -210,14 +240,16 @@
   $('file-editor').after(workDetails);
   $('command-form').addEventListener('submit', runCommand);
   $('command').addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || assistant.composing) return;
     if (!['ArrowUp', 'ArrowDown'].includes(event.key) || !history.length) return;
     event.preventDefault();
     if (historyIndex === history.length) draft = $('command').value;
     historyIndex = Math.max(0, Math.min(history.length, historyIndex + (event.key === 'ArrowUp' ? -1 : 1)));
     $('command').value = historyIndex === history.length ? draft : history[historyIndex];
     $('command').setSelectionRange($('command').value.length, $('command').value.length);
+    assistant.refresh(false);
   });
-  $('file-editor').addEventListener('input', () => { dirty = true; $('editor-status').textContent = '编辑草稿 · 执行命令时自动保存'; });
+  $('file-editor').addEventListener('input', () => { dirty = true; $('editor-status').textContent = '编辑草稿 · 执行命令时自动保存'; renderRecommendations(); });
   $('save-file').addEventListener('click', () => saveEditor());
   $('file-select').addEventListener('change', () => { const target = $('file-select').value; if (dirty && !saveEditor(true)) { $('file-select').value = selectedFile; return; } selectedFile = target; dirty = false; message(); renderFiles(); });
   $('delete-file').addEventListener('click', () => { try { sim.deleteFile(selectedFile); dirty = false; renderFiles(); message('已从虚拟工作区删除。输入 git add 暂存这次删除。'); } catch (error) { message(error.message, true); } });
