@@ -4,7 +4,27 @@
 
 ## Git 图解实验室（独立网页）
 
-双击 [`webui/index.html`](webui/index.html) 即可打开，不需要运行 Java、安装 npm 依赖或联网。页面使用本地普通脚本与 SVG，所有 Git 操作只影响页面中的虚拟仓库，不读写真实仓库，也不会连接 GitHub。
+日常使用桌面的 **Git 图解实验室** 快捷方式：双击会自动启动本地服务并打开 <http://127.0.0.1:17898/>，无需去项目目录寻找文件。重复双击会复用已有服务。服务按需启动，不注册 Windows 登录启动任务。
+
+启动需要 Windows 与 PowerShell 7，不需要 Java、Python、Node.js、npm 或网络。服务只监听 `127.0.0.1:17898`，仅提供 WebUI 静态资源，不读写真实 Git 仓库，也不连接 GitHub。双击 [`webui/index.html`](webui/index.html) 仍可直接离线打开。
+
+### 后台服务管理
+
+- 双击 [`停止Git图解实验室.cmd`](停止Git图解实验室.cmd) 停止后台服务；下次双击桌面快捷方式会重新启动。
+- 服务以当前用户权限隐藏运行，日志位于 `target/webui-service/service.log`；也可使用根目录的 [`启动Git图解实验室.cmd`](启动Git图解实验室.cmd) 启动。
+- 端口被其他程序占用时会明确报错，不会终止其他进程；停止操作会核对服务身份、可执行文件与参数。
+
+在项目根目录的 PowerShell 7 中也可以执行：
+
+```powershell
+.\scripts\GitPlayground.ps1 -Action Shortcut    # 在新电脑创建或恢复桌面快捷方式
+.\scripts\GitPlayground.ps1 -Action Start       # 启动并打开浏览器
+.\scripts\GitPlayground.ps1 -Action Start -NoBrowser
+.\scripts\GitPlayground.ps1 -Action Status
+.\scripts\GitPlayground.ps1 -Action Stop
+```
+
+关闭浏览器不会停止后台服务。每个浏览器页面仍有各自独立的虚拟练习，服务不会保存练习状态；刷新会重新开始。
 
 - 六个练习场景：基础提交、分支与合并、合并冲突、变基、Reset 对比、远程协作。
 - 蓝色画布中的 C0、C1 等圆点代表模拟提交，箭头指向父提交；亮绿色 `main*` 等标签标出当前分支，HEAD 跟随该分支。虚线淡化节点表示失去引用的历史，紫色节点表示远程尚未下载的提交。
