@@ -1,6 +1,8 @@
 (function (root) {
   'use strict';
   const NS = 'http://www.w3.org/2000/svg';
+  const NODE_RADIUS = 19, LABEL_HEIGHT = 25, LABEL_GAP = 52, LABEL_ROW_GAP = 65;
+  const labelWidth = text => Math.max(54, [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 255 ? 11 : 6.8), 18));
   const element = (name, attrs = {}, text) => {
     const node = document.createElementNS(NS, name);
     for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
@@ -12,24 +14,42 @@
   class CommitGraph {
     constructor(svg, onSelect) { this.svg = svg; this.onSelect = onSelect; this.zoom = 1; this.previous = new Map(); }
 
+    references(state) {
+      const refs = [
+        ...Object.entries(state.branches).map(([name, id]) => ({ key: 'local:' + name, text: name + (state.head.branch === name ? '*' : ''), id, active: state.head.branch === name, color: '#3988b6' })),
+        ...Object.entries(state.tracking).map(([name, id]) => ({ key: 'tracking:' + name, text: 'origin/' + name, id, color: '#b4d3e1', small: true })),
+        ...Object.entries(state.remote.branches).filter(([name, id]) => state.tracking[name] !== id).map(([name, id]) => ({ key: 'remote:' + name, text: '远端/' + name, id, color: '#b5b0ed', small: true }))
+      ];
+      if (!state.head.branch) refs.unshift({ key: 'head', text: 'HEAD*', id: state.head.id, active: true });
+      return refs;
+    }
+
+    /** 为标签预留独立行距，单节点场景保留最小画布，避免图例被自动放大。 */
     layout(state) {
       const objects = { ...state.remote.commits, ...state.commits };
       const commits = Object.values(objects).sort((a, b) => a.order - b.order);
-      const depths = new Map(), rows = new Map(), positions = new Map();
+      const depths = new Map(), rows = new Map(), positions = new Map(), refCounts = new Map();
+      const refs = this.references(state);
+      for (const ref of refs) refCounts.set(ref.id, (refCounts.get(ref.id) || 0) + 1);
       const depth = id => {
         if (!depths.has(id)) depths.set(id, objects[id].parents.length ? 1 + Math.max(...objects[id].parents.map(depth)) : 0);
         return depths.get(id);
       };
       for (const commit of commits) { const d = depth(commit.id); if (!rows.has(d)) rows.set(d, []); rows.get(d).push(commit); }
-      const width = Math.max(620, Math.max(...[...rows.values()].map(row => row.length)) * 220 + 100);
+      const width = Math.max(760, Math.max(...[...rows.values()].map(row => row.length)) * 280 + 100, ...refs.map(ref => 2 * (labelWidth(ref.text) + LABEL_GAP + 24)));
+      let y = 65, height = 350;
       for (const [d, row] of [...rows].sort((a, b) => a[0] - b[0])) {
         row.forEach((commit, i) => {
           const parents = commit.parents.map(id => positions.get(id));
           const x = row.length > 1 ? width * (i + 1) / (row.length + 1) : parents.length ? parents.reduce((sum, p) => sum + p.x, 0) / parents.length : width / 2;
-          positions.set(commit.id, { x, y: 65 + d * 125 });
+          positions.set(commit.id, { x, y });
         });
+        const labelRows = Math.ceil(Math.max(...row.map(commit => refCounts.get(commit.id) || 0)) / 2);
+        const clearance = labelRows ? 45 + (labelRows - 1) * LABEL_ROW_GAP + LABEL_HEIGHT + 45 : NODE_RADIUS + 35;
+        height = Math.max(height, y + clearance);
+        y += Math.max(145, clearance + NODE_RADIUS + 20);
       }
-      return { commits, objects, positions, width, height: 185 + Math.max(...depths.values()) * 125 };
+      return { commits, objects, positions, width, height };
     }
 
     draw(state, options = {}) {
@@ -51,7 +71,7 @@
         const point = positions.get(commit.id);
         for (const parent of commit.parents) {
           const to = positions.get(parent);
-          const edge = element('path', { class: 'commit-edge', d: `M ${point.x} ${point.y - 24} C ${point.x} ${point.y - 73}, ${to.x} ${to.y + 73}, ${to.x} ${to.y + 29}`, 'marker-end': 'url(#parent-arrow)' });
+          const edge = element('path', { class: 'commit-edge', d: `M ${point.x} ${point.y - NODE_RADIUS - 1} C ${point.x} ${point.y - 73}, ${to.x} ${to.y + 73}, ${to.x} ${to.y + NODE_RADIUS + 6}`, 'marker-end': 'url(#parent-arrow)' });
           if (!reachable.has(commit.id)) { edge.setAttribute('opacity', '.28'); edge.setAttribute('stroke-dasharray', '5 4'); }
           if (!Object.hasOwn(state.commits, commit.id)) edge.setAttribute('stroke-dasharray', '5 4');
           svg.append(edge);
@@ -62,7 +82,7 @@
         const orphan = !reachable.has(commit.id), active = commit.id === head;
         const group = element('g', { class: 'commit-node' + (orphan ? ' orphan' : '') + (!local ? ' remote-only' : '') + (options.animate && !this.previous.has(commit.id) ? ' new-node' : ''), transform: `translate(${point.x} ${point.y})`, tabindex: 0, role: 'button', 'aria-label': commit.id + ' ' + commit.message + (!local ? '，仅远程拥有' : '') });
         group.append(element('title', {}, commit.id + ' · ' + commit.message + (orphan ? '（失去引用的历史）' : '')));
-        group.append(element('circle', { r: 23, fill: active ? '#7bffc4' : orphan ? '#94c3d7' : !local ? '#b0b1ed' : '#55b5ba' }));
+        group.append(element('circle', { r: NODE_RADIUS, fill: active ? '#7bffc4' : orphan ? '#94c3d7' : !local ? '#b0b1ed' : '#55b5ba' }));
         group.append(element('text', { 'text-anchor': 'middle', dy: 5 }, commit.id));
         group.append(element('text', { class: 'node-hash', y: -34, 'text-anchor': 'middle' }, !local ? '仅在远程' : ''));
         const select = () => {
@@ -73,26 +93,23 @@
         group.addEventListener('keydown', event => { if (['Enter', ' '].includes(event.key)) { event.preventDefault(); select(); } });
         svg.append(group);
       }
-      const refs = [
-        ...Object.entries(state.branches).map(([name, id]) => ({ key: 'local:' + name, text: name + (state.head.branch === name ? '*' : ''), id, active: state.head.branch === name, color: '#3988b6' })),
-        ...Object.entries(state.tracking).map(([name, id]) => ({ key: 'tracking:' + name, text: 'origin/' + name, id, color: '#b4d3e1', small: true })),
-        ...Object.entries(state.remote.branches).filter(([name, id]) => state.tracking[name] !== id).map(([name, id]) => ({ key: 'remote:' + name, text: '远端/' + name, id, color: '#b5b0ed', small: true }))
-      ];
-      if (!state.head.branch) refs.unshift({ key: 'head', text: 'HEAD*', id: head, active: true });
+      const refs = this.references(state);
       const counters = new Map(), tagPositions = new Map();
       for (const ref of refs) {
         const point = positions.get(ref.id), index = counters.get(ref.id) || 0;
         counters.set(ref.id, index + 1);
-        const labelWidth = Math.max(60, [...ref.text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 255 ? 12 : 7.5), 18));
+        const width = labelWidth(ref.text);
         const left = index % 2 === 0;
-        const x = left ? Math.max(8, point.x - labelWidth - 35) : Math.min(layout.width - labelWidth - 8, point.x + 35);
-        const y = point.y + 30 + Math.floor(index / 2) * 37;
+        const x = left ? Math.max(8, point.x - width - LABEL_GAP) : Math.min(layout.width - width - 8, point.x + LABEL_GAP);
+        const y = point.y + 45 + Math.floor(index / 2) * LABEL_ROW_GAP;
         const group = element('g', { class: 'branch-tag', 'data-ref': ref.key, transform: `translate(${x} ${y})` });
-        const endX = point.x - x + (left ? -20 : 20), endY = point.y - y + 12;
-        group.append(element('path', { class: 'branch-pointer', d: `M ${left ? labelWidth - 5 : 5} 4 L ${endX} ${endY}`, 'marker-end': 'url(#label-arrow)' }));
-        group.append(element('rect', { width: labelWidth, height: 29, rx: 8, fill: ref.active ? '#00fa8f' : ref.color, 'stroke-dasharray': ref.small ? '4 2' : 'none' }));
-        group.append(element('text', { x: labelWidth / 2, y: 19, 'text-anchor': 'middle' }, ref.text));
-        if (ref.active) group.append(element('text', { class: 'head-caption', x: labelWidth / 2, y: 43, 'text-anchor': 'middle' }, state.head.branch ? 'HEAD' : '分离状态'));
+        const endX = point.x - x + (left ? -16 : 16), endY = point.y - y + 10;
+        // 下层指针从外侧绕行，避免穿过同一节点的上层分支标签。
+        const startX = left ? width - 5 : 5, bendX = point.x - x + (left ? -34 : 34);
+        group.append(element('path', { class: 'branch-pointer', d: `M ${startX} 0 Q ${bendX} 0 ${endX} ${endY}`, 'marker-end': 'url(#label-arrow)' }));
+        group.append(element('rect', { width, height: LABEL_HEIGHT, rx: 7, fill: ref.active ? '#00fa8f' : ref.color, 'stroke-dasharray': ref.small ? '4 2' : 'none' }));
+        group.append(element('text', { x: width / 2, y: 17, 'text-anchor': 'middle' }, ref.text));
+        if (ref.active) group.append(element('text', { class: 'head-caption', x: width / 2, y: 39, 'text-anchor': 'middle' }, state.head.branch ? 'HEAD' : '分离状态'));
         svg.append(group); tagPositions.set(ref.key, { x, y });
         const previous = this.previousTags?.get(ref.key);
         if (options.animate && previous && !matchMedia('(prefers-reduced-motion: reduce)').matches && (previous.x !== x || previous.y !== y)) {
