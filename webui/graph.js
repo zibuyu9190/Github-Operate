@@ -24,7 +24,30 @@
       return refs;
     }
 
-    /** 为标签预留独立行距，单节点场景保留最小画布，避免图例被自动放大。 */
+    /** 连续提交继承父列；同层发生分叉时才让出间距，不按提交创建顺序重新左右排队。 */
+    columns(rows) {
+      const columns = new Map();
+      for (const row of rows) {
+        const preferred = row.map(commit => ({
+          commit,
+          column: commit.parents.length ? commit.parents.reduce((sum, id) => sum + columns.get(id), 0) / commit.parents.length : 0
+        })).sort((a, b) => a.column - b.column || a.commit.order - b.commit.order);
+        const blocks = [];
+        // 减去序号后约束位置单调：只合并重叠区间，以最小平移保证相邻节点至少相隔一列。
+        preferred.forEach((item, i) => {
+          blocks.push({ start: i, end: i, sum: item.column - i, count: 1 });
+          while (blocks.length > 1) {
+            const right = blocks[blocks.length - 1], left = blocks[blocks.length - 2];
+            if (left.sum / left.count <= right.sum / right.count) break;
+            blocks.splice(-2, 2, { start: left.start, end: right.end, sum: left.sum + right.sum, count: left.count + right.count });
+          }
+        });
+        for (const block of blocks) for (let i = block.start; i <= block.end; i++) columns.set(preferred[i].commit.id, block.sum / block.count + i);
+      }
+      return columns;
+    }
+
+    /** 横向按提交链分列，纵向为标签预留行距；画布居中只做整体平移，不交换分支位置。 */
     layout(state) {
       const objects = { ...state.remote.commits, ...state.commits };
       const commits = Object.values(objects).sort((a, b) => a.order - b.order);
@@ -36,12 +59,15 @@
         return depths.get(id);
       };
       for (const commit of commits) { const d = depth(commit.id); if (!rows.has(d)) rows.set(d, []); rows.get(d).push(commit); }
-      const width = Math.max(760, Math.max(...[...rows.values()].map(row => row.length)) * 280 + 100, ...refs.map(ref => 2 * (labelWidth(ref.text) + LABEL_GAP + 24)));
+      const layers = [...rows].sort((a, b) => a[0] - b[0]);
+      const columns = this.columns(layers.map(([, row]) => row));
+      const minColumn = Math.min(...columns.values()), maxColumn = Math.max(...columns.values()), centerColumn = (minColumn + maxColumn) / 2;
+      const columnGap = 280, padding = Math.max(120, ...refs.map(ref => labelWidth(ref.text) + LABEL_GAP + 24));
+      const width = Math.max(760, (maxColumn - minColumn) * columnGap + padding * 2);
       let y = 65, height = 350;
-      for (const [d, row] of [...rows].sort((a, b) => a[0] - b[0])) {
-        row.forEach((commit, i) => {
-          const parents = commit.parents.map(id => positions.get(id));
-          const x = row.length > 1 ? width * (i + 1) / (row.length + 1) : parents.length ? parents.reduce((sum, p) => sum + p.x, 0) / parents.length : width / 2;
+      for (const [, row] of layers) {
+        row.forEach(commit => {
+          const x = width / 2 + (columns.get(commit.id) - centerColumn) * columnGap;
           positions.set(commit.id, { x, y });
         });
         const labelRows = Math.ceil(Math.max(...row.map(commit => refCounts.get(commit.id) || 0)) / 2);
