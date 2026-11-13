@@ -4,9 +4,11 @@
   const $ = id => document.getElementById(id);
   const node = (tag, className, text) => { const item = document.createElement(tag); if (className) item.className = className; if (text !== undefined) item.textContent = text; return item; };
   const sim = new Simulator();
+  let lesson = new GitLessons.Practice(sim.scene, sim.snapshot());
   let selectedFile = 'hello.txt', selectedCommit = null, dirty = false, history = [], historyIndex = 0, draft = '', lastResult = null, replayTimer = null;
   const graph = new CommitGraph($('graph'), showCommit);
   const assistant = new GitCommandAssist.Controller($('command'), assistContext);
+  const lessonView = new GitLessons.View($('graph-stage'), fillCommand, route => { lesson.route = route; renderLesson(); });
   const labels = ['编辑与提交', '分叉与汇合', '解决同一行冲突', '改变提交的基点', '理解三种模式', '本地与远程同步'];
 
   /** 草稿也参与下一步推荐，但读取建议本身不会保存文件或改变虚拟仓库。 */
@@ -37,6 +39,11 @@
     title.replaceChildren(document.createTextNode('接下来可以试试 '), node('span', '', '按当前仓库状态推荐 · 点击填入'));
   }
 
+  /** 草稿参与验收但不写入仓库，防止未保存编辑仍显示全部完成。 */
+  function renderLesson() {
+    lessonView.update(lesson, assistContext().state, dirty);
+  }
+
   /** 用户输入只进入 textContent、value 或 SVG 文本节点，不拼接 HTML。 */
   function terminalEntry(command, output, type = '') {
     const entry = node('div', 'terminal-entry');
@@ -65,7 +72,9 @@
   }
 
   function loadScene(scene) {
+    const previousRoute = lesson.scene === scene ? lesson.route : undefined;
     cancelReplay(); sim.loadScene(scene); selectedFile = 'hello.txt'; selectedCommit = null; dirty = false; lastResult = null;
+    lesson = new GitLessons.Practice(scene, sim.snapshot(), previousRoute);
     graph.previous = new Map(); graph.previousTags = new Map();
     const info = SCENES[scene], index = Object.keys(SCENES).indexOf(scene);
     $('scene-number').textContent = 'EXPERIMENT ' + String(index + 1).padStart(2, '0') + ' / 06';
@@ -150,7 +159,7 @@
       $('conflict-base').textContent = conflict.base ?? '（此版本没有该文件）'; $('conflict-ours').textContent = conflict.ours ?? '（此版本删除了文件）'; $('conflict-theirs').textContent = conflict.theirs ?? '（此版本删除了文件）';
     }
     renderCode($('work-diff'), work, index, true);
-    renderRecommendations();
+    renderRecommendations(); renderLesson();
   }
 
   function showCommit(commit, remoteOnly, expand = true) {
@@ -208,6 +217,7 @@
     const input = $('command').value.trim(); if (!input) return;
     history.push(input); historyIndex = history.length; draft = '';
     const result = sim.execute(input);
+    lesson.record(result);
     terminalEntry('$ ' + input, result.output, !result.ok ? 'terminal-error' : result.conflict ? 'terminal-conflict' : '');
     $('command').value = ''; assistant.refresh(false); message(); dirty = false; render(result.ok); updateExplanation(result, input);
     if (result.ok) { lastResult = result; $('replay').disabled = false; }
@@ -319,7 +329,7 @@
     $('command').setSelectionRange($('command').value.length, $('command').value.length);
     assistant.refresh(false);
   });
-  $('file-editor').addEventListener('input', () => { dirty = true; $('editor-status').textContent = '编辑草稿 · 执行命令时自动保存'; renderRecommendations(); });
+  $('file-editor').addEventListener('input', () => { dirty = true; $('editor-status').textContent = '编辑草稿 · 执行命令时自动保存'; renderRecommendations(); renderLesson(); });
   $('save-file').addEventListener('click', () => saveEditor());
   $('file-select').addEventListener('change', () => { const target = $('file-select').value; if (dirty && !saveEditor(true)) { $('file-select').value = selectedFile; return; } selectedFile = target; dirty = false; message(); renderFiles(); });
   $('delete-file').addEventListener('click', () => { try { sim.deleteFile(selectedFile); dirty = false; renderFiles(); message('已从虚拟工作区删除。输入 git add 暂存这次删除。'); } catch (error) { message(error.message, true); } });

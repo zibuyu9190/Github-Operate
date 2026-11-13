@@ -184,6 +184,8 @@ function Invoke-StaticRequest {
         '/command-assist.js' = @('command-assist.js', 'text/javascript; charset=utf-8')
         '/command-assist.css' = @('command-assist.css', 'text/css; charset=utf-8')
         '/simulator.js' = @('simulator.js', 'text/javascript; charset=utf-8')
+        '/lessons.js' = @('lessons.js', 'text/javascript; charset=utf-8')
+        '/lessons.css' = @('lessons.css', 'text/css; charset=utf-8')
         '/graph.js' = @('graph.js', 'text/javascript; charset=utf-8')
         '/app.js' = @('app.js', 'text/javascript; charset=utf-8')
     }

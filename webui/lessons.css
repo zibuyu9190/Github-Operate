@@ -1,0 +1,44 @@
+/* 独立样式适配原布局与当前工作台，参考答案收起时只占一行。 */
+.lesson-guide { flex: none; margin: 0 16px 12px; border: 1px solid #cbdedc; border-radius: 10px; background: #f7fbfa; color: #27394c; font-size: 13px; }
+.lesson-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 12px 14px; cursor: pointer; list-style: none; }
+.lesson-summary::-webkit-details-marker { display: none; }
+.lesson-summary strong::before { content: '▸'; display: inline-block; margin-right: 8px; }
+.lesson-guide[open] .lesson-summary strong::before { content: '▾'; }
+.lesson-summary:focus-visible, .lesson-command:focus-visible, .lesson-route:focus-visible { outline: 2px solid #0f766e; outline-offset: 3px; }
+.lesson-badge { padding: 3px 8px; border-radius: 5px; background: #e5eeed; color: #425d5a; font-size: 12px; }
+.lesson-complete .lesson-badge { color: #126240; background: #d8f4e4; }
+.lesson-toggle { margin-left: auto; font-size: 12px; color: #60746f; }
+.lesson-guide[open] .lesson-toggle { display: none; }
+.lesson-body { border-top: 1px solid #dce8e5; padding: 14px; max-height: 360px; overflow: auto; }
+/* 当前工作台采用固定高度；展开答案时允许页面滚动，确保答案和图都能完整访问。 */
+body:has(.lesson-guide[open]) { height: auto; min-height: 100vh; overflow: auto; }
+.workbench:has(.lesson-guide[open]) { flex: none; min-height: calc(100vh - 60px); }
+.visual-panel:has(.lesson-guide[open]) { flex: none; }
+.visual-panel:has(.lesson-guide[open]) .graph-stage { flex: none; height: 260px; }
+.lesson-body h3 { margin: 16px 0 8px; font-size: 13px; }
+.lesson-goal { margin: 0 0 12px; line-height: 1.7; font-weight: 600; }
+.lesson-route-bar { display: flex; align-items: center; gap: 12px; }
+.lesson-route-label { flex: 0 0 auto; }
+.lesson-route { min-width: 0; max-width: 100%; border: 1px solid #bfd5cf; border-radius: 6px; padding: 7px 9px; color: #27394c; background: #fff; }
+.lesson-notice { margin: 9px 0; color: #61736e; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.lesson-steps { padding-left: 25px; margin: 8px 0; }
+.lesson-steps li { padding: 4px 0 6px; line-height: 1.7; }
+.lesson-command { display: inline-block; max-width: 100%; background: #fff; color: #195f52; border: 1px solid #c6dad4; border-radius: 5px; padding: 5px 9px; font: 12px/1.6 Consolas, 'Microsoft YaHei', monospace; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; cursor: pointer; }
+.lesson-command:hover { background: #e9f5ee; border-color: #7ead9c; }
+.lesson-sample { margin: 7px 0; padding: 9px 12px; border-left: 3px solid #9abdad; background: #eef5f1; font: 12px/1.7 Consolas, 'Microsoft YaHei', monospace; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.lesson-expected { padding: 10px 12px; margin: 12px 0 8px; border-radius: 6px; background: #e9f3ef; line-height: 1.7; }
+.lesson-status { margin: 6px 0 10px; font-weight: 600; line-height: 1.6; }
+.lesson-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.lesson-checks li { display: flex; flex-direction: column; gap: 4px; padding: 9px 11px; border: 1px solid #e1e7e4; border-radius: 6px; background: #fff; }
+.lesson-check-label { font-weight: 600; }
+.lesson-checks small { color: #69776f; line-height: 1.6; }
+.lesson-checks .passed { border-color: #bddac9; background: #f0faf3; }
+.lesson-checks .passed .lesson-check-label { color: #226340; }
+@media (max-width: 680px) {
+  .lesson-guide { margin: 0 10px 10px; }
+  .lesson-summary { padding: 10px; gap: 8px; }
+  .lesson-toggle { width: 100%; margin-left: 20px; }
+  .lesson-body { padding: 10px; max-height: 55vh; }
+  .lesson-route-bar { align-items: stretch; flex-direction: column; gap: 6px; }
+  .lesson-route { width: 100%; }
+}
