@@ -14,7 +14,7 @@ test('补全支持带 git 前缀与省略前缀，且不会改动仓库', () => 
   assert.equal(suggestions(sim, 'git sta')[0].value, 'git status ');
   assert.equal(suggestions(sim, 'sw')[0].value, 'switch ');
   assert.equal(suggestions(sim, 'gi')[0].value, 'git ');
-  assert.deepEqual(suggestions(sim, 'git stash'), []);
+  assert.deepEqual(suggestions(sim, 'git stash drop '), []);
   assert.deepEqual(suggestions(sim, ''), []);
   assert.ok(complete('', 0, context(sim), true).length);
   assert.deepEqual(sim.snapshot(), before);

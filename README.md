@@ -39,22 +39,28 @@
 
 命令可带 `git` 前缀；含空格的文件名和说明需要加引号。页面的“命令手册”包含可点击示例。
 
-手册还包含 `git switch -c <your-branch-name>` 等命令模板，以及提交并推送、暂存后提交并推送、首次发布新分支和更新主分支四类流程。尖括号中的内容是待替换的占位符；点击模板会填入有效示例并选中待修改内容。含 `&&` 的整行命令用于 PowerShell 7、Git Bash 等真实终端，网页中可点击流程下的分步按钮逐条练习；不会自动执行组合命令。
+手册还包含 `git switch -c <your-branch-name>`、restore、stash、show 等命令模板，以及提交并推送、首次发布新分支、更新主分支、取消全部暂存、合并分支后清理、冲突处理和临时保存切换等流程。尖括号中的内容是待替换的占位符；点击模板会填入有效示例并选中待修改内容。含 `&&` 的整行命令用于 PowerShell 7、Git Bash 等真实终端，网页中可点击流程下的分步按钮逐条练习；不会自动执行组合命令。冲突流程按当前操作选择合并或变基对应的卡片。
 
 | 类别 | 支持写法 |
 | --- | --- |
-| 查看 | `status`；`log [--oneline] [--graph] [--all]`；`diff [--cached]` |
+| 查看 | `status`；`log [--oneline] [--graph] [--all]`；`diff [--cached]`；`show [提交引用]` |
 | 暂存、提交 | `add <文件…>`、`add .`；`commit -m "说明"` |
-| 分支 | `branch`、`branch <名称>`、`branch -d <名称>`；`switch <分支>`、`switch -c <名称>`；`checkout <分支或提交>`、`checkout -b <名称>` |
+| 取消暂存、恢复 | `restore --staged <文件…>`、`restore --staged .`；`restore <文件…>`、`restore .`（从暂存区恢复工作区，会丢弃未暂存修改） |
+| 临时保存 | `stash`、`stash push [-u] [-m "说明"]`；`stash list`；`stash pop`（最近一份） |
+| 分支 | `branch [-a] [-vv]`、`branch <名称>`、`branch -d <名称>`；`switch <分支>`、`switch -c <名称>`；`checkout <分支或提交>`、`checkout -b <名称>` |
 | 合并、变基 | `merge [--no-ff] <引用>`；`rebase <引用>`；两者均支持 `--continue`、`--abort` |
 | 撤回 | `reset [--soft或--mixed或--hard] [提交]`（默认 mixed、HEAD）；`revert <普通提交>`、`revert --continue`、`revert --abort` |
-| 虚拟远程 | `fetch [origin]`；`pull [--rebase或--no-rebase] [origin [分支]]`；`push [origin [分支]]`、`push -u origin <分支>` |
+| 虚拟远程 | `remote [-v]`（仅展示虚拟 origin，无真实地址）；`fetch [origin]`；`pull [--rebase或--no-rebase] [origin [分支]]`；`push [origin [分支]]`、`push -u origin <分支>` |
 
 引用支持本地分支、`origin/<分支>`、C 编号、唯一的 4–7 位模拟短 ID、`HEAD`、`HEAD~n`、`HEAD^` 和指定父提交的 `HEAD^2`。C 编号及短 ID 都不是实际 Git 对象哈希。图中保留失去引用的对象供教学比较，`log --all` 只列出本地引用可达的历史；文本 `--graph` 以父提交列表表达拓扑，完整连线以画布为准。
 
 ### 教学边界与验证
 
 只支持普通文本，每个文件最多 300 行、20000 个字符。merge、rebase、revert、pull 开始前要求工作区和暂存区干净，这是本教学版的支持边界。暂不支持二进制、重命名检测、文件/目录合并冲突、多个最佳合并基点、交互式 rebase、重放合并提交、撤回合并提交、强制推送及未列出的其他参数；未知写法会明确提示，不会伪造成功。仅在当前页面内保留状态，无账号或持久化。
+
+restore 支持明确文件名与 `.`，不支持目录路径匹配、`--source` 或在未解决冲突时恢复文件。`restore --staged` 保留工作区；普通 restore 从暂存区恢复，不从 HEAD 恢复。`show` 对普通提交显示与父提交的差异，根提交与空快照比较；合并提交按教学方式分别与每个父提交比较。
+
+stash 默认保存已跟踪改动，`-u` 包含未跟踪文件。教学版使用独立快照栈保存，不在提交图中模拟 stash 的内部提交结构，也不支持 `--index`、`apply`、`drop` 或指定历史 stash。pop 前要求已跟踪文件与暂存区干净，遇到文件覆盖或目录冲突会整体拒绝。pop 成功后移除最近记录，普通修改需重新 add，已跟踪的新增文件恢复到暂存区；冲突时保留记录，编辑后 add 标记全部解决，即可正常提交，无需 `--continue`。可用 `reset --hard` 丢弃恢复产生的已跟踪改动，stash 记录仍保留。stash 随刷新或场景重置清空。
 
 在项目根目录使用 Node.js 22 或更新版本运行独立网页测试：
 
@@ -64,7 +70,7 @@ node --test webui/tests/*.test.cjs
 
 真实 Git 对照测试还需要本机 `git` 命令；仅在 `target/webui-validation/` 中创建并清理独立临时仓库与本地裸仓库，比较文件、暂存区、引用和父子拓扑，不连接网络，也不修改开发仓库。网页本身不需要 Node.js 或 Git。
 
-命令语义参考 Git 官方的 [merge](https://git-scm.com/docs/git-merge)、[rebase](https://git-scm.com/docs/git-rebase)、[reset](https://git-scm.com/docs/git-reset)、[revert](https://git-scm.com/docs/git-revert) 和 [push](https://git-scm.com/docs/git-push) 说明。
+命令语义参考 Git 官方的 [merge](https://git-scm.com/docs/git-merge)、[rebase](https://git-scm.com/docs/git-rebase)、[reset](https://git-scm.com/docs/git-reset)、[revert](https://git-scm.com/docs/git-revert)、[push](https://git-scm.com/docs/git-push)、[restore](https://git-scm.com/docs/git-restore)、[stash](https://git-scm.com/docs/git-stash)、[show](https://git-scm.com/docs/git-show)、[branch](https://git-scm.com/docs/git-branch) 和 [remote](https://git-scm.com/docs/git-remote) 说明。
 
 ## 环境
 

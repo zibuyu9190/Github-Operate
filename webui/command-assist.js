@@ -5,9 +5,13 @@
     status: ['查看仓库与文件状态', 'status'],
     log: ['查看提交历史', 'log [--oneline] [--graph] [--all]'],
     diff: ['查看文件差异', 'diff [--cached]'],
+    show: ['查看提交说明和文件改动', 'show [引用]'],
+    restore: ['取消暂存或丢弃未暂存修改', 'restore [--staged] <文件…> | restore [--staged] .'],
+    stash: ['临时保存与恢复改动', 'stash push [-u] [-m "说明"] | stash list | stash pop'],
+    remote: ['查看虚拟远程仓库', 'remote [-v]'],
     add: ['暂存文件的当前内容', 'add <文件…> | add .'],
     commit: ['把暂存区保存为提交', 'commit -m "提交说明"'],
-    branch: ['列出、创建或删除分支', 'branch [名称] | branch -d <名称>'],
+    branch: ['列出、创建或删除分支', 'branch [-a] [-vv] | branch <名称> | branch -d <名称>'],
     switch: ['切换或创建本地分支', 'switch <分支> | switch -c <新分支>'],
     checkout: ['切换分支或查看提交', 'checkout <引用> | checkout -b <新分支>'],
     merge: ['合并另一条历史', 'merge [--no-ff] <引用> | merge --continue | merge --abort'],
@@ -103,6 +107,31 @@
       switch (name) {
         case 'log': options([['--oneline', '每个提交显示一行'], ['--graph', '显示父子拓扑'], ['--all', '显示所有本地引用可达的历史']]); break;
         case 'diff': if (!args.length) offer('--cached', '比较暂存区与 HEAD'); break;
+        case 'show': if (!args.length) refs(); break;
+        case 'remote': if (!args.length) offer('-v', '查看模拟远程的获取与推送信息'); break;
+        case 'restore': {
+          if (state.pending) break;
+          if (!args.length) offer('--staged', '取消暂存，保留工作区修改');
+          if (args.some(x => x.startsWith('-') && x !== '--staged')) break;
+          const staged = args[0] === '--staged';
+          offer('.', staged ? '取消全部暂存，保留工作区修改' : '丢弃所有已跟踪文件的未暂存修改', '文件');
+          for (const file of context.files) {
+            const known = Object.hasOwn(state.index, file.path) || (staged && Object.hasOwn(state.commits[headId(state)].tree, file.path));
+            if (known && !args.includes(file.path)) offer(file.path, staged ? '取消该文件暂存，保留修改' : '恢复为暂存区内容，丢弃未暂存修改', '文件');
+          }
+          break;
+        }
+        case 'stash':
+          if (!args.length) {
+            if (!state.pending) { offer('push', '临时保存改动'); if (state.stashes.length) offer('pop', '恢复最近一份；成功后移除记录，冲突时保留'); }
+            offer('list', '列出暂存记录');
+          } else if (args[0] === 'push' && !state.pending) {
+            if (args.at(-1) === '-m') { if (!prefix) offer('', '在引号内填写暂存说明', '说明', 'message'); }
+            else {
+              options([['-u', '包含未跟踪文件'], ['-m', '指定暂存说明']]);
+            }
+          }
+          break;
         case 'add': {
           offer('.', '暂存所有新增、修改和删除', '文件');
           const paths = [...context.files].sort((a, b) => Number(b.unstaged || b.conflict) - Number(a.unstaged || a.conflict));
@@ -114,8 +143,11 @@
           else if (args.length === 1 && args[0] === '-m' && !prefix) offer('', '在引号内填写提交说明', '说明', 'message');
           break;
         case 'branch':
-          if (!args.length) { offer('-d', '仅删除已合入的非当前分支'); newBranch(); }
-          else if (args.length === 1 && args[0] === '-d') for (const name of Object.keys(state.branches)) if (name !== state.head.branch) offer(name, '待删除的本地分支，请确认已合入', '分支');
+          if (!args.length) { offer('-d', '仅删除已合入的非当前分支'); options([['-a', '列出本地与远程跟踪分支'], ['-vv', '查看上游与领先/落后关系']]); newBranch(); }
+          else if (args.length === 1 && args[0] === '-d') {
+            for (const name of Object.keys(state.branches)) if (name !== state.head.branch) offer(name, '待删除的本地分支，请确认已合入', '分支');
+          }
+          else if (args.every(x => ['-a', '-vv'].includes(x))) options([['-a', '列出本地与远程跟踪分支'], ['-vv', '查看上游与领先/落后关系']]);
           break;
         case 'switch': case 'checkout':
           if (!args.length) { offer(name === 'switch' ? '-c' : '-b', '创建并切换到新分支'); refs(name === 'switch'); }
@@ -148,7 +180,7 @@
       const suffix = input.slice(active.end), space = !c.edit && !suffix ? ' ' : '';
       const value = input.slice(0, active.start) + text + space + suffix;
       const cursor = active.start + text.length + space.length - (c.edit ? 1 : 0);
-      return { label: c.edit ? '"提交说明"' : c.text, description: c.description, kind: c.kind, value, start: cursor, end: cursor };
+      return { label: c.edit ? '"说明"' : c.text, description: c.description, kind: c.kind, value, start: cursor, end: cursor };
     });
   }
 
@@ -170,15 +202,18 @@
       const remainingMarkers = Object.keys(op.conflicts).some(hasMarkers);
       const ready = changed.filter(f => !hasMarkers(f.path));
       if (ready.length) add('git add ' + ready.map(f => quote(f.path)).join(' '), '检查解决结果后，将这些文件标记为已解决');
-      if (!op.unresolved.length && !changed.length && !remainingMarkers) add('git ' + op.type + ' --continue', '解决结果已暂存，继续完成本次操作');
+      if (op.type !== 'stash' && !op.unresolved.length && !changed.length && !remainingMarkers) add('git ' + op.type + ' --continue', '解决结果已暂存，继续完成本次操作');
       add('git status', remainingMarkers || op.unresolved.length ? '先在文件区解决冲突，再暂存解决结果' : '核对解决状态与暂存内容');
-      add('git ' + op.type + ' --abort', '放弃本次操作，恢复开始前的仓库状态');
+      if (op.type === 'stash') add('git stash list', '恢复发生冲突，原 stash 记录仍保留；解决后 add 即可');
+      else add('git ' + op.type + ' --abort', '放弃本次操作，恢复开始前的仓库状态');
     } else if (changed.length || staged) {
       if (changed.length) add('git add ' + (changed.length <= 2 ? changed.map(f => quote(f.path)).join(' ') : '.'), '将工作区的改动放入暂存区');
       if (staged) {
         add('git commit -m "说明本次修改"', '暂存区已有改动，填写说明后创建提交');
         add('git diff --cached', '提交前检查暂存区相对 HEAD 的差异');
       } else if (changed.some(f => !f.untracked)) add('git diff', '检查已跟踪文件相对暂存区的差异');
+      if (changed.length) add('git stash push -u -m "临时保存"', '暂时不提交时，保存改动后可切换分支');
+      else if (staged) add('git restore --staged ' + quote(files.find(f => f.staged).path), '取消该文件暂存，保留工作区修改');
       add('git status', '确认哪些改动已暂存、哪些仍在工作区');
     } else {
       const upstream = state.upstreams[state.head.branch], remote = state.tracking[upstream];
@@ -189,6 +224,7 @@
       if (scene === 'reset' && state.commits[current]?.parents.length) add('git reset --soft HEAD~1', '只移动分支指针，观察改动保留在暂存区');
       if (remote && state.remote.branches[upstream] === remote && current !== remote && ancestor(state, remote, current)) add('git push', '本地有尚未推送的提交，同步到上游');
       else if (state.head.branch && !upstream) add('git push -u origin ' + quote(state.head.branch), '发布当前分支并设置上游');
+      if (state.stashes.length) add('git stash pop', '恢复最近一份临时改动；冲突时记录会保留');
       add('git log --oneline --graph --all', '观察提交历史与分支指向');
       add('git status', '查看当前分支、文件和同步状态');
       if (scene === 'basic') add('git switch -c feature', '工作区干净，可以创建分支继续练习');

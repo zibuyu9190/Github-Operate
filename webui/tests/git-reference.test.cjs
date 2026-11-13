@@ -79,6 +79,54 @@ function fixture(t) {
   return { directory, sim, git, edit, remove, command, commit, assertState };
 }
 
+test('真实 Git 对照：restore 的暂存/工作区恢复、新增文件取消暂存和删除恢复', t => {
+  const f = fixture(t);
+  f.edit('hello.txt', '暂存版\n'); f.command('add', 'hello.txt'); f.edit('hello.txt', '工作版\n');
+  f.command('restore', 'hello.txt'); f.assertState();
+  f.edit('hello.txt', '最新工作版\n'); f.command('restore', '--staged', 'hello.txt'); f.assertState();
+  f.edit('new file.txt', '新文件\n'); f.command('add', 'new file.txt'); f.command('restore', '--staged', 'new file.txt'); f.assertState();
+  f.remove('hello.txt'); f.command('restore', 'hello.txt'); f.assertState();
+  f.remove('hello.txt'); f.command('add', 'hello.txt'); f.command('restore', '--staged', '.'); f.command('restore', '.'); f.assertState();
+});
+
+test('真实 Git 对照：stash 默认与 -u、暂存后再次编辑、多份保存与默认 pop', t => {
+  const f = fixture(t);
+  f.edit('hello.txt', '暂存版\n'); f.command('add', 'hello.txt'); f.edit('hello.txt', '工作版\n'); f.edit('untracked.txt', '保留\n');
+  f.command('stash', 'push', '-m', '第一次'); f.assertState();
+  f.edit('README.md', '另一份\n'); f.command('stash', 'push', '-u', '-m', '第二次'); f.assertState();
+  assert.equal(f.sim.state.stashes.length, f.git(['stash', 'list']).stdout.trim().split('\n').length);
+  f.command('stash', 'pop'); f.assertState(); f.command('restore', 'README.md'); f.command('stash', 'pop'); f.assertState();
+  assert.equal(f.git(['stash', 'list']).stdout, '');
+});
+
+test('真实 Git 对照：stash 已暂存新文件、已暂存删除与未暂存删除', t => {
+  for (const stagedDelete of [false, true]) {
+    const f = fixture(t); f.edit('new.txt', '新增\n'); f.command('add', 'new.txt'); f.remove('hello.txt');
+    if (stagedDelete) f.command('add', 'hello.txt');
+    f.command('stash', 'push'); f.assertState(); f.command('stash', 'pop'); f.assertState();
+  }
+});
+
+test('真实 Git 对照：stash 跨分支非重叠合并与冲突保留记录，add 后可普通提交', t => {
+  for (const conflict of [false, true]) {
+    const f = fixture(t); f.command('branch', 'feature'); f.edit('hello.txt', 'stash 内容\n'); f.command('stash', 'push', '-m', '跨分支');
+    f.command('switch', 'feature'); f.edit(conflict ? 'hello.txt' : 'feature.txt', 'feature 内容\n'); f.commit('分支修改');
+    const result = f.command('stash', 'pop');
+    if (conflict) {
+      assert.equal(result.conflict, true); assert.equal(f.sim.state.stashes.length, 1); assert.match(f.git(['stash', 'list']).stdout, /跨分支/);
+      assert.ok(f.git(['ls-files', '-u']).stdout); f.edit('hello.txt', '解决结果\n'); f.command('add', 'hello.txt'); f.assertState();
+      f.command('commit', '-m', '解决恢复冲突');
+    }
+    f.assertState();
+  }
+});
+
+test('真实 Git 对照：stash pop 拒绝覆盖同名未跟踪文件，保留 stash 与文件', t => {
+  const f = fixture(t); f.edit('loose.txt', '保存内容\n'); f.command('stash', 'push', '-u'); f.edit('loose.txt', '新内容\n');
+  const before = f.sim.snapshot(); f.command('stash', 'pop'); f.assertState();
+  assert.deepEqual(f.sim.snapshot(), before); assert.ok(f.git(['stash', 'list']).stdout);
+});
+
 test('真实 Git 对照：暂存后再修改、三种 reset 及未跟踪文件保留', t => {
   for (const mode of ['soft', 'mixed', 'hard']) {
     const f = fixture(t);

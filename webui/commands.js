@@ -44,12 +44,39 @@
       case 'diff':
         if (a.length > 1 || (a.length && a[0] !== '--cached')) invalid();
         return { name, cached: a.length > 0 };
+      case 'show':
+        if (a.length > 1 || a.some(x => !plain(x))) invalid();
+        return { name, ref: a[0] || 'HEAD' };
+      case 'remote':
+        if (a.length > 1 || (a.length && a[0] !== '-v')) invalid();
+        return { name, verbose: a.length > 0 };
+      case 'restore': {
+        const staged = a[0] === '--staged', paths = staged ? a.slice(1) : a;
+        if (!paths.length || paths.some(x => !plain(x))) invalid();
+        return { name, staged, paths };
+      }
+      case 'stash': {
+        const action = a[0] || 'push';
+        if (['list', 'pop'].includes(action)) {
+          if (a.length !== 1) invalid();
+          return { name, action };
+        }
+        if (action !== 'push') invalid();
+        let includeUntracked = false, message = null;
+        for (let i = 1; i < a.length; i++) {
+          if (a[i] === '-u' && !includeUntracked) includeUntracked = true;
+          else if (a[i] === '-m' && message === null && a[i + 1]?.trim()) message = a[++i];
+          else invalid();
+        }
+        return { name, action, includeUntracked, message };
+      }
       case 'add': if (!a.length || a.some(x => !plain(x))) invalid(); return { name, paths: a };
       case 'commit':
         if (a.length !== 2 || a[0] !== '-m' || !a[1].trim()) invalid();
         return { name, message: a[1] };
       case 'branch':
         if (!a.length) return { name, action: 'list' };
+        if (a.every(x => ['-a', '-vv'].includes(x)) && new Set(a).size === a.length) return { name, action: 'list', all: a.includes('-a'), verbose: a.includes('-vv') };
         if (a.length === 1 && plain(a[0])) return { name, action: 'create', branch: a[0] };
         if (a.length === 2 && a[0] === '-d' && plain(a[1])) return { name, action: 'delete', branch: a[1] };
         return invalid();

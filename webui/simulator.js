@@ -9,6 +9,27 @@
   const lines = text => (text || '').match(/[^\n]*\n|[^\n]+$/g) || [];
   const put = (tree, path, text) => { if (text === undefined) delete tree[path]; else tree[path] = text; };
 
+  /** 普通文件快照不能同时包含文件及其子路径，避免恢复操作留下无法编辑的目录冲突。 */
+  function checkTreePaths(tree) {
+    const paths = Object.keys(tree);
+    if (paths.some(p => paths.some(other => other.startsWith(p + '/')))) throw new Error('教学版暂不支持恢复时的文件与目录冲突，仓库状态保持不变。');
+  }
+
+  /** 查看命令共用逐行差异，快照始终只读；输出作为纯文本交给页面。 */
+  function treeDiff(a, b) {
+    const output = [];
+    for (const path of keys(a, b)) {
+      if (value(a, path) === value(b, path)) continue;
+      output.push('--- ' + path + '\n+++ ' + path);
+      for (const edit of edits(value(a, path), value(b, path))) {
+        output.push('@@ 原文件行 ' + (edit.start + 1) + ' @@');
+        output.push(...lines(value(a, path)).slice(edit.start, edit.end).map(x => '-' + x.replace(/\n$/, '')));
+        output.push(...edit.lines.map(x => '+' + x.replace(/\n$/, '')));
+      }
+    }
+    return output.join('\n') || '没有差异。';
+  }
+
   /** 使用 LCS 计算行级编辑；限制教学文件大小，防止同步算法阻塞页面。 */
   function edits(base, changed) {
     const a = lines(base), b = lines(changed);
@@ -100,7 +121,11 @@
       const before = this.snapshot();
       try {
         const command = Commands.parse(input);
-        if (this.state.pending && !['status', 'log', 'diff', 'add'].includes(command.name) && !(command.name === this.state.pending.type && ['continue', 'abort'].includes(command.action)) && !(command.name === 'commit' && this.state.pending.type === 'merge')) {
+        const pending = this.state.pending;
+        const readOnly = ['status', 'log', 'diff', 'show', 'remote'].includes(command.name) || (command.name === 'branch' && command.action === 'list') || (command.name === 'stash' && command.action === 'list');
+        const discardStashConflict = pending?.type === 'stash' && command.name === 'reset' && command.mode === 'hard';
+        if (pending?.type === 'stash' && !readOnly && command.name !== 'add' && !discardStashConflict) throw new Error('stash 恢复冲突尚未解决：编辑后 git add；也可 reset --hard 丢弃恢复结果。stash 记录仍保留，没有 --continue 或 --abort。');
+        if (pending && pending.type !== 'stash' && !readOnly && command.name !== 'add' && !(command.name === pending.type && ['continue', 'abort'].includes(command.action)) && !(command.name === 'commit' && pending.type === 'merge')) {
           throw new Error('当前处于 ' + this.state.pending.type + ' 处理中，请先解决并继续，或使用对应的 --abort。');
         }
         const result = this.dispatch(command);
@@ -116,6 +141,10 @@
         case 'status': return this.status();
         case 'log': return this.log(c);
         case 'diff': return this.diff(c.cached);
+        case 'show': return this.show(c.ref);
+        case 'remote': return { output: c.verbose ? 'origin\t模拟远程（无真实地址） (fetch)\norigin\t模拟远程（无真实地址） (push)' : 'origin', explanation: '此网页只有虚拟 origin；真实终端的 remote -v 会显示仓库地址，这里不会连接网络。' };
+        case 'restore': return this.restore(c);
+        case 'stash': return this.stash(c);
         case 'add': return this.add(c.paths);
         case 'commit': return this.commit(c.message);
         case 'branch': return this.branch(c);
@@ -194,7 +223,7 @@
     installTree(tree) { this.state.index = clone(tree); this.state.work = clone(tree); }
 
     requireClean(operation) {
-      if (!this.isClean()) throw new Error('本教学版执行 ' + operation + ' 前要求工作区和暂存区干净，请先 add 并 commit，或使用 reset 处理改动。这是教学版的支持边界。');
+      if (!this.isClean()) throw new Error('本教学版执行 ' + operation + ' 前要求工作区和暂存区干净，请先 add 并 commit、stash 临时保存，或使用 reset 处理改动。这是教学版的支持边界。');
     }
 
     /** 编辑只影响工作区，已暂存内容始终保持 add 时的快照。 */
@@ -272,6 +301,71 @@
       return { output: output.join('\n') || '没有差异。', explanation: cached ? 'diff --cached 比较暂存区与 HEAD：这些内容会进入下一次提交。' : 'diff 比较工作区与暂存区；与 Git 一样，未跟踪文件不出现在此差异中。' };
     }
 
+    show(ref) {
+      const commit = this.state.commits[this.resolve(ref)];
+      const output = ['提交 ' + commit.id + ' (' + commit.hash + ')', '父提交：' + (commit.parents.join('、') || '无'), commit.message];
+      for (const parent of commit.parents.length ? commit.parents : [null]) {
+        if (commit.parents.length > 1) output.push('相对父提交 ' + parent + ' 的差异（教学展示）：');
+        output.push(treeDiff(parent ? this.state.commits[parent].tree : {}, commit.tree));
+      }
+      return { output: output.join('\n\n'), explanation: 'show 查看提交说明和文件改动，不移动 HEAD。合并提交在教学版中分别与每个父提交比较。' };
+    }
+
+    /** staged 从 HEAD 恢复暂存区；默认从暂存区恢复工作区，不改变提交引用。 */
+    restore(c) {
+      const source = c.staged ? this.headTree() : this.state.index;
+      const known = c.staged ? keys(source, this.state.index) : keys(source);
+      const selected = c.paths.includes('.') ? known : [...new Set(c.paths)];
+      for (const path of c.paths.filter(p => p !== '.')) {
+        validPath(path);
+        if (!known.includes(path)) throw new Error('恢复来源中没有该文件：' + path + '。restore 不删除未跟踪文件。');
+      }
+      const target = clone(c.staged ? this.state.index : this.state.work);
+      for (const path of selected) put(target, path, value(source, path));
+      checkTreePaths(target);
+      if (c.staged) this.state.index = target; else this.state.work = target;
+      return { output: (c.staged ? '已取消暂存：' : '已恢复工作区文件：') + selected.join('、'), explanation: c.staged ? '暂存区恢复为 HEAD，工作区修改保留；已暂存的新文件变为未跟踪。' : '工作区恢复为暂存区内容，该文件尚未暂存的修改已丢弃；已暂存内容和 HEAD 不变。' };
+    }
+
+    /** 暂存架独立保存快照，不伪装成用户提交；pop 默认恢复改动，不恢复原暂存划分。 */
+    stash(c) {
+      const stack = this.state.stashes;
+      if (c.action === 'list') return { output: stack.map((item, n) => 'stash@{' + n + '}: On ' + item.branch + ': ' + item.message).join('\n') || '没有暂存记录。', explanation: 'stash@{0} 是最近保存的一份；教学版 pop 只取最近一份。' };
+      if (c.action === 'push') {
+        const head = this.headTree(), tracked = keys(head, this.state.index), work = {}, untracked = {};
+        for (const path of tracked) put(work, path, value(this.state.work, path));
+        for (const path of Object.keys(this.state.work)) if (!tracked.includes(path)) untracked[path] = this.state.work[path];
+        if (same(head, this.state.index) && same(head, work) && (!c.includeUntracked || !Object.keys(untracked).length)) return { output: '没有需要临时保存的改动。', explanation: '默认只保存已跟踪文件；-u 也包含未跟踪文件。' };
+        stack.unshift({ base: clone(head), index: clone(this.state.index), work: clone(work), untracked: c.includeUntracked ? clone(untracked) : {}, branch: this.state.head.branch || 'detached HEAD', message: c.message ?? ('WIP ' + this.headId()) });
+        const nextWork = { ...(c.includeUntracked ? {} : untracked), ...clone(head) };
+        checkTreePaths(nextWork);
+        this.state.index = clone(head); this.state.work = nextWork;
+        return { output: '已保存到 stash@{0}：' + stack[0].message, explanation: '已跟踪的工作区和暂存区回到 HEAD；' + (c.includeUntracked ? '未跟踪文件也一起保存并移出工作区。' : '未跟踪文件留在工作区。') + ' HEAD 和分支位置不变，可切换分支后再 stash pop。' };
+      }
+      if (!stack.length) throw new Error('没有可恢复的 stash 记录。');
+      const item = stack[0], head = this.headTree();
+      if (!same(head, this.state.index) || keys(head).some(p => value(head, p) !== value(this.state.work, p))) throw new Error('教学版 stash pop 前要求已跟踪文件与暂存区干净，请先提交或再次 stash。未跟踪文件可保留，但不能与恢复路径重叠。');
+      const loose = {};
+      for (const path of Object.keys(this.state.work)) if (!own(this.state.index, path)) loose[path] = this.state.work[path];
+      const restored = keys(item.work, item.untracked), present = keys(this.state.work, this.state.index);
+      const overlaps = (a, b) => a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
+      if (keys(loose).some(p => restored.some(q => overlaps(p, q))) || keys(item.untracked).some(p => present.some(q => overlaps(p, q)))) throw new Error('stash pop 将覆盖现有文件或目录，已拒绝；stash 记录仍保留。');
+      const merged = this.mergeTrees(item.base, head, item.work, 'stash@{0}');
+      checkTreePaths({ ...loose, ...merged.tree, ...item.untracked });
+      const op = { type: 'stash', conflicts: merged.conflicts, unresolved: [] };
+      if (Object.keys(merged.conflicts).length) {
+        this.applyMerge(merged, op); this.state.pending = op;
+        this.state.work = { ...loose, ...this.state.work, ...clone(item.untracked) };
+        return { conflict: true, output: 'CONFLICT：' + op.unresolved.join('、') + '\nstash@{0} 已保留。', explanation: 'stash pop 恢复时发生冲突。编辑文件并 add，全部标记解决后即可正常提交；没有 stash --continue 或 --abort。记录继续保留。' };
+      }
+      this.state.work = { ...loose, ...merged.tree, ...clone(item.untracked) };
+      this.state.index = clone(head);
+      // 与默认 Git stash pop 一致：普通修改不自动暂存，恢复的新增文件进入暂存区。
+      for (const path of keys(merged.tree)) if (!own(head, path)) this.state.index[path] = merged.tree[path];
+      stack.shift();
+      return { output: '已恢复并移除 stash@{0}。', explanation: '改动已恢复到当前分支，普通修改需要重新 add；新增的已跟踪文件恢复到暂存区。HEAD 不变，未跟踪文件仍未跟踪。' };
+    }
+
     add(paths) {
       const all = keys(this.state.index, this.state.work, this.headTree());
       const selected = paths.includes('.') ? all : [...new Set(paths)];
@@ -281,6 +375,7 @@
         put(this.state.index, path, value(this.state.work, path));
         if (this.state.pending) this.state.pending.unresolved = this.state.pending.unresolved.filter(p => p !== path);
       }
+      if (this.state.pending?.type === 'stash' && !this.state.pending.unresolved.length) this.state.pending = null;
       return { output: '已暂存：' + (selected.join('、') || '没有改动'), explanation: 'add 将此刻的工作区内容复制到暂存区。之后继续编辑文件，不会自动更新已经暂存的内容。冲突文件 add 后视为已解决，请自行检查是否仍留有冲突标记。' };
     }
 
@@ -295,7 +390,19 @@
     }
 
     branch(c) {
-      if (c.action === 'list') return { output: Object.keys(this.state.branches).map(name => (name === this.state.head.branch ? '* ' : '  ') + name + ' → ' + this.state.branches[name]).join('\n'), explanation: '分支是指向某个提交的可移动标签。创建分支不会复制文件或自动切换。' };
+      if (c.action === 'list') {
+        const output = Object.keys(this.state.branches).map(name => {
+          const id = this.state.branches[name], upstream = this.state.upstreams[name], remote = this.state.tracking[upstream];
+          let relation = '';
+          if (upstream) {
+            const localHistory = this.ancestors(id), remoteHistory = remote ? this.ancestors(remote) : new Set();
+            relation = remote ? ' [origin/' + upstream + '：领先 ' + [...localHistory].filter(x => !remoteHistory.has(x)).length + '，落后 ' + [...remoteHistory].filter(x => !localHistory.has(x)).length + ']' : ' [origin/' + upstream + '：已丢失]';
+          }
+          return (name === this.state.head.branch ? '* ' : '  ') + name + ' → ' + id + (c.verbose ? relation + ' ' + this.state.commits[id].message : '');
+        });
+        if (c.all) for (const [name, id] of Object.entries(this.state.tracking)) output.push('  remotes/origin/' + name + ' → ' + id + (c.verbose ? ' ' + this.state.commits[id].message : ''));
+        return { output: output.join('\n'), explanation: '-a 同时列出本地分支与本地远程跟踪引用；-vv 显示上游和领先/落后数量，依据最近一次同步。创建分支不会自动切换。' };
+      }
       validBranch(c.branch);
       if (c.action === 'create') {
         if (own(this.state.branches, c.branch)) throw new Error('分支已经存在：' + c.branch);
@@ -467,6 +574,7 @@
         this.state.index = clone(target); this.state.work = { ...untracked, ...clone(target) };
       } else if (c.mode === 'mixed') this.state.index = clone(target);
       this.moveHead(id);
+      if (this.state.pending?.type === 'stash') this.state.pending = null;
       const meanings = { soft: '只移动分支/HEAD，暂存区和工作区保持原样。', mixed: '移动分支/HEAD，并让暂存区回到目标快照；工作区保持原样。', hard: '移动分支/HEAD，同时重置暂存区和已跟踪文件。无冲突的未跟踪文件保留。' };
       return { output: 'HEAD → ' + id + '（--' + c.mode + '）', explanation: meanings[c.mode] + ' 图中旧提交淡化显示，便于比较。' };
     }
@@ -514,7 +622,7 @@
     loadScene(scene) {
       if (!own(SCENES, scene)) throw new Error('未知练习场景。');
       this.scene = scene;
-      this.state = { commits: {}, branches: {}, head: { branch: 'main', id: null }, index: {}, work: {}, pending: null, remote: { commits: {}, branches: {} }, tracking: {}, upstreams: { main: 'main' }, nextId: 0 };
+      this.state = { commits: {}, branches: {}, head: { branch: 'main', id: null }, index: {}, work: {}, stashes: [], pending: null, remote: { commits: {}, branches: {} }, tracking: {}, upstreams: { main: 'main' }, nextId: 0 };
       const tree = { 'hello.txt': '你好，Git！\n这是一段问候。\n保留这一行作为共同上下文。\n学习从一次提交开始。\n', 'README.md': '# Git Playground\n\n在这里安心练习 Git。\n' };
       const first = this.newCommit(tree, [], '初始化练习仓库');
       this.state.branches.main = first; this.installTree(tree);
