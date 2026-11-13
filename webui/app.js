@@ -54,9 +54,13 @@
     assistant.refresh(false);
   }
 
-  function commandButton(command) {
+  function commandButton(command, selection = '') {
     const button = node('button', 'command-chip', command);
-    button.type = 'button'; button.addEventListener('click', () => { $('help-dialog').close(); fillCommand(command); });
+    button.type = 'button'; button.addEventListener('click', () => {
+      $('help-dialog').close(); fillCommand(command);
+      const start = selection ? command.indexOf(selection) : -1;
+      if (start >= 0) $('command').setSelectionRange(start, start + selection.length);
+    });
     return button;
   }
 
@@ -219,6 +223,50 @@
     const copy = node('span', 'scene-copy'); copy.append(node('strong', '', info.title), node('small', '', labels[i]));
     button.append(node('span', 'scene-index', String(i + 1).padStart(2, '0')), copy); button.addEventListener('click', () => loadScene(key)); $('scenes').append(button);
   });
+  $('help-title').textContent = 'Git 命令手册与常用流程';
+  document.querySelector('#help-dialog > p').textContent = '单条命令可在网页内练习；含 && 的组合行供真实终端参考。点击模板或分步命令只会填入输入框，请检查后再按 Enter 执行。';
+
+  /** 占位符用于讲解语法；点击时改用有效示例并选中变量，避免把尖括号当成实际参数。 */
+  const templates = [
+    ['git switch -c <your-branch-name>', '创建并切换到新分支，例如 feature-demo。分支刚创建时与原分支指向同一提交。', 'git switch -c feature-demo', 'feature-demo'],
+    ['git switch <your-branch-name>', '切换到已存在的本地分支；切换前留意未提交的改动。', 'git switch main', 'main'],
+    ['git branch <your-branch-name>', '只创建分支，不切换；需要在不同分支分别提交，图中才会出现分叉。', 'git branch feature-demo', 'feature-demo'],
+    ['git checkout -b <your-branch-name>', '创建并切换分支，是 switch -c 的另一种写法。', 'git checkout -b feature-demo', 'feature-demo'],
+    ['git add <file-path>', '暂存指定文件，例如 hello.txt；add . 会暂存全部新增、修改和删除。', 'git add hello.txt', 'hello.txt'],
+    ['git commit -m "<message>"', '提交暂存区；把 message 换成本次修改说明。commit 本身不会推送。', 'git commit -m "完成本次修改"', '完成本次修改'],
+    ['git merge <your-branch-name>', '把指定分支合并到当前所在分支，不会切换分支。', 'git merge bugFix', 'bugFix'],
+    ['git push -u origin <your-branch-name>', '首次发布本地分支并设置上游；后续在该分支通常可直接 git push。', 'git push -u origin feature-demo', 'feature-demo']
+  ];
+  const templateGroup = node('section', 'help-group help-templates');
+  templateGroup.append(node('h3', '', '常用命令模板 · 点击填入可编辑示例'), node('p', 'help-note', '<your-branch-name>、<file-path> 和 <message> 都是占位符，需要替换，不要输入尖括号。点击后会选中需要修改的示例内容。'));
+  for (const [template, description, example, selection] of templates) {
+    const row = node('div', 'help-row help-template-row'), button = commandButton(example, selection);
+    button.textContent = template; button.title = '点击填入示例：' + example;
+    row.append(button, node('span', '', description)); templateGroup.append(row);
+  }
+  $('help-content').append(templateGroup);
+
+  /** && 不交给模拟引擎执行；组合行只展示，分步按钮逐条填入支持的命令。 */
+  const workflows = [
+    ['提交并推送', 'git commit -m "<message>" && git push', '适合已有暂存改动，且当前分支已设置上游的情况。', [['git commit -m "完成本次修改"', '完成本次修改'], ['git push']]],
+    ['暂存全部改动、提交并推送', 'git add . && git commit -m "<message>" && git push', '先编辑文件，再暂存、提交和推送；当前分支需要已设置上游。没有可提交的改动时，commit 会失败，后续 push 不会执行。', [['git add .'], ['git commit -m "完成本次修改"', '完成本次修改'], ['git push']]],
+    ['提交并首次发布新分支', 'git add . && git commit -m "<message>" && git push -u origin <your-branch-name>', '先用 switch -c 创建并切换分支，再编辑文件。把最后的分支名换成当前分支名，首次推送后会建立跟踪关系。', [['git add .'], ['git commit -m "完成本次修改"', '完成本次修改'], ['git push -u origin feature-demo', 'feature-demo']]],
+    ['切换主分支并更新', 'git switch main && git pull --no-rebase origin main', '先保存并提交改动，保持工作区干净，再切换 main 并合并远程更新。', [['git switch main'], ['git pull --no-rebase origin main']]]
+  ];
+  const flowGroup = node('section', 'help-group help-workflows');
+  flowGroup.append(node('h3', '', '常用组合流程 · 真实终端整行执行'), node('p', 'help-note help-terminal-note', '&& 在 PowerShell 7、Git Bash 等终端中表示：前一步成功才执行下一步。失败后会停止后续命令，已成功的步骤不会自动撤销。网页暂不支持 &&，请依次点击下面的分步命令，逐条执行。'));
+  for (const [title, chain, description, steps] of workflows) {
+    const card = node('article', 'help-flow'), code = node('pre', 'help-chain', chain), actions = node('div', 'help-flow-steps');
+    card.append(node('h4', '', title), code, node('p', 'help-note', description), node('div', 'help-step-label', '网页分步练习 · 按顺序点击填入，再按 Enter 执行'));
+    steps.forEach(([command, selection], i) => { const button = commandButton(command, selection); button.textContent = (i + 1) + ' · ' + command; actions.append(button); });
+    card.append(actions); flowGroup.append(card);
+  }
+  const sources = node('p', 'help-note help-sources', '参考：');
+  for (const [title, url] of [['Git switch', 'https://git-scm.com/docs/git-switch'], ['Git commit', 'https://git-scm.com/docs/git-commit'], ['Git push', 'https://git-scm.com/docs/git-push'], ['PowerShell &&', 'https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_pipeline_chain_operators']]) {
+    const link = node('a', '', title); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; sources.append(link);
+  }
+  flowGroup.append(sources); $('help-content').append(flowGroup);
+
   const manual = [
     ['查看状态与差异', [['git status', '查看三个区域和同步状态'], ['git log --oneline --graph --all', '可达历史；文本列出父提交'], ['git diff', '工作区与暂存区差异'], ['git diff --cached', '暂存区与 HEAD 差异']]],
     ['暂存与提交', [['git add hello.txt', '支持多个文件，含空格的路径加引号'], ['git add .', '暂存所有新增、修改和删除'], ['git commit -m "学习 Git"', '提交暂存内容，中文说明可用']]],
