@@ -372,3 +372,94 @@
   window.addEventListener('resize', () => graph.resize());
   loadScene('basic');
 })();
+
+/* 搜索只筛选手册原节点，保留示例按钮的填入与变量选中行为。 */
+(function () {
+  'use strict';
+
+  const normalize = value => value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+
+  /** 省略字符仍按原顺序匹配；英文长词额外容忍一次编辑或相邻字母颠倒，避免短词过度匹配。 */
+  function fuzzyWord(term, word) {
+    let index = 0;
+    for (const char of word) if (char === term[index]) index++;
+    if (index === term.length) return true;
+    if (!/^[a-z-]{4,}$/.test(term) || !/^[a-z-]{4,}$/.test(word) || Math.abs(term.length - word.length) > 1) return false;
+    let previous = Array.from({ length: word.length + 1 }, (_, i) => i), beforePrevious;
+    for (let i = 1; i <= term.length; i++) {
+      const row = [i];
+      for (let j = 1; j <= word.length; j++) {
+        row[j] = Math.min(row[j - 1] + 1, previous[j] + 1, previous[j - 1] + (term[i - 1] === word[j - 1] ? 0 : 1));
+        if (i > 1 && j > 1 && term[i - 1] === word[j - 2] && term[i - 2] === word[j - 1]) row[j] = Math.min(row[j], beforePrevious[j - 2] + 1);
+      }
+      beforePrevious = previous; previous = row;
+    }
+    return previous[word.length] <= 1;
+  }
+
+  const dialog = document.getElementById('help-dialog'), content = document.getElementById('help-content');
+  const groups = [...content.querySelectorAll('.help-group')].map(element => ({
+    element,
+    entries: [...element.querySelectorAll('.help-row, .help-flow')].map(item => {
+      const text = normalize((element.querySelector('h3')?.textContent || '') + ' ' + item.textContent);
+      return { element: item, text, words: text.match(/[a-z0-9_-]+|[\p{Script=Han}]+/gu) || [] };
+    })
+  }));
+  const containers = [...content.querySelectorAll('.help-panel, .help-bento-col')];
+  const tabs = [...content.querySelectorAll('.help-tabs')];
+  let saved = null;
+
+  const bar = document.createElement('div'); bar.className = 'help-search';
+  const label = document.createElement('label'); label.htmlFor = 'help-search-input'; label.textContent = '搜索手册';
+  const controls = document.createElement('div'); controls.className = 'help-search-controls';
+  const input = document.createElement('input');
+  input.id = 'help-search-input'; input.type = 'search'; input.autofocus = true; input.autocomplete = 'off'; input.maxLength = 160;
+  input.placeholder = '模糊搜索命令或中文说明，如 rbase、取消暂存';
+  input.setAttribute('aria-controls', 'help-content'); input.setAttribute('aria-describedby', 'help-search-status');
+  const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'button quiet small'; clear.textContent = '清空';
+  const status = document.createElement('p'); status.id = 'help-search-status'; status.className = 'help-search-status';
+  status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite'); status.setAttribute('aria-atomic', 'true');
+  controls.append(input, clear); bar.append(label, controls, status); content.before(bar);
+
+  /** 搜索覆盖全部分类；退出搜索时恢复原来的分类、可见性和滚动位置。 */
+  function filter() {
+    const terms = normalize(input.value).split(' ').filter(Boolean);
+    clear.disabled = input.value.length === 0;
+    if (!terms.length) {
+      if (saved) {
+        for (const [element, hidden] of saved.visibility) element.hidden = hidden;
+        dialog.classList.remove('help-search-active'); dialog.scrollTop = saved.scrollTop; saved = null;
+      }
+      status.textContent = '支持命令片段、漏字母与错字模糊匹配；多个关键词用空格分隔。';
+      return;
+    }
+    if (!saved) {
+      const elements = [...tabs, ...containers, ...groups.flatMap(group => [group.element, ...group.entries.map(entry => entry.element)])];
+      saved = { visibility: new Map(elements.map(element => [element, element.hidden])), scrollTop: dialog.scrollTop };
+      dialog.classList.add('help-search-active');
+    }
+    let count = 0;
+    for (const group of groups) {
+      let matches = 0;
+      for (const entry of group.entries) {
+        const match = terms.every(term => entry.text.includes(term) || entry.words.some(word => fuzzyWord(term, word)));
+        entry.element.hidden = !match;
+        if (match) matches++;
+      }
+      group.element.hidden = matches === 0; count += matches;
+    }
+    for (const element of containers) element.hidden = ![...element.querySelectorAll('.help-group')].some(group => !group.hidden);
+    for (const element of tabs) element.hidden = true;
+    status.textContent = count ? '找到 ' + count + ' 条相关命令与流程 · 全部分类 · 模糊匹配' : '没有找到匹配内容，试试命令片段或更短的中文关键词。';
+  }
+
+  input.addEventListener('input', filter);
+  clear.addEventListener('click', () => { input.value = ''; filter(); input.focus(); });
+  input.addEventListener('keydown', event => {
+    // 输入法选字期间不拦截 Esc；有搜索词时先清空，再次 Esc 交给原生弹窗关闭。
+    if (event.key === 'Escape' && input.value && !event.isComposing && event.keyCode !== 229) {
+      event.preventDefault(); event.stopPropagation(); input.value = ''; filter();
+    }
+  });
+  filter();
+})();

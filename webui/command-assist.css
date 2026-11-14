@@ -38,3 +38,27 @@
 .help-sources { display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .help-sources a { color: #0f766e; }
 @media (max-width: 600px) { .help-template-row { grid-template-columns: minmax(0, 1fr); gap: 5px; } .help-flow { padding: 9px; } }
+
+/* 搜索栏在弹窗内保持可见，原节点筛选兼容分类页与离线页面布局。 */
+#help-dialog { overflow-y: auto; }
+#help-dialog [hidden] { display: none !important; }
+.help-search {
+  position: sticky; top: -18px; z-index: 2; margin-top: 12px; padding: 12px 0 8px;
+  background: var(--surface, #fff); border-bottom: 1px solid var(--line, #e2e8f0);
+}
+.help-search label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 700; }
+.help-search-controls { display: flex; align-items: center; gap: 8px; }
+.help-search input {
+  width: 100%; min-width: 0; padding: 9px 11px; border: 1px solid #94a3b8; border-radius: 7px;
+  background: var(--surface, #fff); color: var(--ink, #0f172a); font: inherit; font-size: 13px;
+}
+.help-search input::placeholder { color: #64748b; }
+.help-search :focus-visible { outline: 2px solid var(--accent, #0d9488); outline-offset: 2px; }
+.help-search button { flex: none; min-height: 34px; }
+.help-search-status { margin: 6px 0 0; color: var(--ink-secondary, #475569); font-size: 12px; line-height: 1.5; }
+.help-search-active .help-panel { min-height: 0; }
+.help-search-active .help-card { flex: initial; }
+@media (max-width: 680px) {
+  .help-search input { font-size: 16px; }
+  .help-search-active .help-bento-grid { grid-template-columns: 1fr; }
+}
