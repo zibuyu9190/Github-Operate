@@ -2,6 +2,7 @@
   'use strict';
   const NS = 'http://www.w3.org/2000/svg';
   const NODE_RADIUS = 19, LABEL_HEIGHT = 25, LABEL_GAP = 52, LABEL_ROW_GAP = 65;
+  const EDGE_CLEARANCE = 32;
   const labelWidth = text => Math.max(54, [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 255 ? 11 : 6.8), 18));
   const element = (name, attrs = {}, text) => {
     const node = document.createElementNS(NS, name);
@@ -47,11 +48,11 @@
       return columns;
     }
 
-    /** 横向按提交链分列，纵向为标签预留行距；画布居中只做整体平移，不交换分支位置。 */
+    /** 标签占用每层节点下方的侧边区域；提交连线仅在标签区下方展开，跨层连线走外侧通道。 */
     layout(state) {
       const objects = { ...state.remote.commits, ...state.commits };
       const commits = Object.values(objects).sort((a, b) => a.order - b.order);
-      const depths = new Map(), rows = new Map(), positions = new Map(), refCounts = new Map();
+      const depths = new Map(), rows = new Map(), positions = new Map(), refCounts = new Map(), exits = new Map();
       const refs = this.references(state);
       for (const ref of refs) refCounts.set(ref.id, (refCounts.get(ref.id) || 0) + 1);
       const depth = id => {
@@ -62,7 +63,9 @@
       const layers = [...rows].sort((a, b) => a[0] - b[0]);
       const columns = this.columns(layers.map(([, row]) => row));
       const minColumn = Math.min(...columns.values()), maxColumn = Math.max(...columns.values()), centerColumn = (minColumn + maxColumn) / 2;
-      const columnGap = 280, padding = Math.max(120, ...refs.map(ref => labelWidth(ref.text) + LABEL_GAP + 24));
+      const widestLabel = Math.max(54, ...refs.map(ref => labelWidth(ref.text)));
+      // 相邻节点的左右标签均须留在各自通道内，长分支名不能压到另一条提交链。
+      const columnGap = Math.max(280, 2 * (widestLabel + LABEL_GAP) + 32), padding = Math.max(120, widestLabel + LABEL_GAP + 24);
       const width = Math.max(760, (maxColumn - minColumn) * columnGap + padding * 2);
       let y = 65, height = 350;
       for (const [, row] of layers) {
@@ -72,10 +75,27 @@
         });
         const labelRows = Math.ceil(Math.max(...row.map(commit => refCounts.get(commit.id) || 0)) / 2);
         const clearance = labelRows ? 45 + (labelRows - 1) * LABEL_ROW_GAP + LABEL_HEIGHT + 45 : NODE_RADIUS + 35;
+        exits.set(depth(row[0].id), y + clearance - 10);
         height = Math.max(height, y + clearance);
-        y += Math.max(145, clearance + NODE_RADIUS + 20);
+        y += Math.max(145, clearance + NODE_RADIUS + 20 + EDGE_CLEARANCE);
       }
-      return { commits, objects, positions, width, height };
+      const edges = [], outside = width - 12;
+      let skipLanes = 0;
+      for (const commit of commits) for (const parent of commit.parents) {
+        const point = positions.get(commit.id), to = positions.get(parent), exit = exits.get(depth(parent));
+        const start = point.y - NODE_RADIUS - 1, end = to.y + NODE_RADIUS + 6;
+        let path;
+        if (depth(commit.id) === depth(parent) + 1) {
+          const bend = (start + exit) / 2;
+          path = `M ${point.x} ${start} C ${point.x} ${bend}, ${to.x} ${bend}, ${to.x} ${exit} L ${to.x} ${end}`;
+        } else {
+          // 合并父提交可能跨过多层：竖线放在全部标签之外，横线只经过相邻层之间的留白。
+          const lane = outside + skipLanes++ * 20, incoming = (exits.get(depth(commit.id) - 1) + start) / 2;
+          path = `M ${point.x} ${start} L ${point.x} ${incoming} L ${lane} ${incoming} L ${lane} ${exit} L ${to.x} ${exit} L ${to.x} ${end}`;
+        }
+        edges.push({ commit: commit.id, parent, path });
+      }
+      return { commits, objects, positions, width: width + Math.max(0, skipLanes - 1) * 20, height, edges };
     }
 
     draw(state, options = {}) {
@@ -93,15 +113,11 @@
       const reachable = new Set();
       const visit = id => { if (!id || reachable.has(id)) return; reachable.add(id); layout.objects[id].parents.forEach(visit); };
       [...Object.values(state.branches), ...Object.values(state.tracking), ...Object.values(state.remote.branches), head].forEach(visit);
-      for (const commit of layout.commits) {
-        const point = positions.get(commit.id);
-        for (const parent of commit.parents) {
-          const to = positions.get(parent);
-          const edge = element('path', { class: 'commit-edge', d: `M ${point.x} ${point.y - NODE_RADIUS - 1} C ${point.x} ${point.y - 73}, ${to.x} ${to.y + 73}, ${to.x} ${to.y + NODE_RADIUS + 6}`, 'marker-end': 'url(#parent-arrow)' });
-          if (!reachable.has(commit.id)) { edge.setAttribute('opacity', '.28'); edge.setAttribute('stroke-dasharray', '5 4'); }
-          if (!Object.hasOwn(state.commits, commit.id)) edge.setAttribute('stroke-dasharray', '5 4');
-          svg.append(edge);
-        }
+      for (const route of layout.edges) {
+        const edge = element('path', { class: 'commit-edge', d: route.path, 'marker-end': 'url(#parent-arrow)' });
+        if (!reachable.has(route.commit)) { edge.setAttribute('opacity', '.28'); edge.setAttribute('stroke-dasharray', '5 4'); }
+        if (!Object.hasOwn(state.commits, route.commit)) edge.setAttribute('stroke-dasharray', '5 4');
+        svg.append(edge);
       }
       for (const commit of layout.commits) {
         const point = positions.get(commit.id), local = Object.hasOwn(state.commits, commit.id);
@@ -139,7 +155,8 @@
         svg.append(group); tagPositions.set(ref.key, { x, y });
         const previous = this.previousTags?.get(ref.key);
         if (options.animate && previous && !matchMedia('(prefers-reduced-motion: reduce)').matches && (previous.x !== x || previous.y !== y)) {
-          group.animate([{ transform: `translate(${previous.x}px, ${previous.y}px)` }, { transform: `translate(${x}px, ${y}px)` }], { duration: 650, easing: 'cubic-bezier(.22,.8,.3,1)' });
+          // 在新位置淡入提示指针变化，避免平移动画扫过已经重绘的提交连线。
+          group.animate([{ opacity: .35 }, { opacity: 1 }], { duration: 450, easing: 'ease-out' });
         }
       }
       this.previous = positions; this.previousTags = tagPositions;

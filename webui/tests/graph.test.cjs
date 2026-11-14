@@ -39,6 +39,7 @@ for (const reduced of [false, true]) test('分支移动在减少动画偏好为 
   const view = renderer(reduced), sim = new Simulator('reset'); view.graph.draw(sim.state);
   sim.execute('git reset --hard HEAD~1'); view.graph.draw(sim.state, { animate: true });
   assert.equal(view.animations.length > 0, !reduced);
+  assert.ok(view.animations.every(frames => frames.every(frame => !Object.hasOwn(frame, 'transform'))));
   const orphan = view.all().find(e => e.attrs['aria-label']?.startsWith('C2 ')); assert.match(orphan.attrs.class, /orphan/);
 });
 
@@ -133,4 +134,82 @@ test('六场景及变基、远程合并后：每条边仍指向真实父提交�
   run(sim, 'git fetch');
   // fetch 改变标签数量后允许增减纵向留白，但不应交换已有提交的左右列。
   for (const [id, point] of before) assert.equal(view.graph.layout(sim.state).positions.get(id).x, point.x);
+});
+
+/** 从实际 SVG 路径取样并检测线段穿框，独立于布局器的通道计算。 */
+function pathSegments(d, offset = [0, 0]) {
+  const tokens = d.match(/[MLCQ]|-?\d+(?:\.\d+)?/g), segments = []; let point;
+  while (tokens.length) {
+    const command = tokens.shift(), count = { M: 2, L: 2, Q: 4, C: 6 }[command];
+    assert.ok(count, '未知 SVG 路径指令：' + command);
+    const values = tokens.splice(0, count).map(Number), controls = [];
+    for (let i = 0; i < count; i += 2) controls.push([values[i] + offset[0], values[i + 1] + offset[1]]);
+    if (command === 'M') { point = controls[0]; continue; }
+    const curve = [point, ...controls];
+    for (let step = 1; step <= 128; step++) {
+      const t = step / 128; let points = curve;
+      while (points.length > 1) points = points.slice(1).map((p, i) => p.map((v, axis) => points[i][axis] * (1 - t) + v * t));
+      segments.push([point, points[0]]); point = points[0];
+    }
+  }
+  return segments;
+}
+
+function crossesBox([a, b], box) {
+  let enter = 0, leave = 1;
+  for (let axis = 0; axis < 2; axis++) {
+    const delta = b[axis] - a[axis], low = (axis ? box.y : box.x) - 3;
+    const high = (axis ? box.y + box.height : box.x + box.width) + 3;
+    if (!delta) { if (a[axis] < low || a[axis] > high) return false; }
+    else {
+      const ends = [(low - a[axis]) / delta, (high - a[axis]) / delta].sort((x, y) => x - y);
+      enter = Math.max(enter, ends[0]); leave = Math.min(leave, ends[1]);
+      if (enter > leave) return false;
+    }
+  }
+  return true;
+}
+
+function assertLabelsClear(view, state) {
+  const before = JSON.stringify(state); view.graph.draw(state);
+  const tags = view.all().filter(e => e.attrs.class === 'branch-tag').map(tag => {
+    const [x, y] = tag.attrs.transform.match(/-?\d+(?:\.\d+)?/g).map(Number);
+    const rect = tag.children.find(e => e.tag === 'rect');
+    const height = Math.max(Number(rect.attrs.height), ...tag.children.filter(e => e.tag === 'text').map(e => Number(e.attrs.y) + 6));
+    return { key: tag.attrs['data-ref'], x, y, width: Number(rect.attrs.width), height, pointer: tag.children.find(e => e.attrs.class === 'branch-pointer').attrs.d };
+  });
+  const lines = view.all().filter(e => e.attrs.class === 'commit-edge').map(e => ({ key: '提交连线', segments: pathSegments(e.attrs.d) }));
+  for (const tag of tags) lines.push({ key: tag.key, segments: pathSegments(tag.pointer, [tag.x, tag.y]) });
+  for (const line of lines) for (const tag of tags) {
+    if (line.key !== tag.key) assert.equal(line.segments.some(segment => crossesBox(segment, tag)), false, line.key + ' 不应穿过 ' + tag.key);
+  }
+  for (let i = 0; i < tags.length; i++) for (let j = i + 1; j < tags.length; j++) {
+    const a = tags[i], b = tags[j];
+    assert.ok(a.x + a.width < b.x || b.x + b.width < a.x || a.y + a.height < b.y || b.y + b.height < a.y, a.key + ' 与 ' + b.key + ' 不应重叠');
+  }
+  assert.equal(JSON.stringify(state), before);
+}
+
+test('根提交挂 origin/main 且下方分为三支：标签与提交线、其他引用指针留有间距', () => {
+  const view = renderer(false), sim = new Simulator('basic');
+  run(sim, 'git switch -c dev'); commitFile(sim, 'dev.txt', 'dev\n');
+  run(sim, 'git switch main'); run(sim, 'git switch -c test01'); commitFile(sim, 'test.txt', 'test\n');
+  run(sim, 'git switch main'); commitFile(sim, 'main.txt', 'main\n');
+  assertLabelsClear(view, sim.state);
+  assert.equal(sim.state.tracking.main, 'C0');
+  for (let i = 0; i < 7; i++) run(sim, 'git branch feature-with-a-long-branch-name-' + i);
+  assertLabelsClear(view, sim.state);
+  sim.simulateRemote(); assertLabelsClear(view, sim.state);
+  run(sim, 'git fetch'); assertLabelsClear(view, sim.state);
+});
+
+test('六类场景和跨层合并：长名称、多层标签及 HEAD 说明均不被连线穿过', () => {
+  const view = renderer(false);
+  for (const scene of Object.keys(SCENES)) assertLabelsClear(view, new Simulator(scene).state);
+  const sim = new Simulator('basic'); run(sim, 'git branch dev');
+  for (let i = 0; i < 4; i++) commitFile(sim, 'main.txt', String(i));
+  run(sim, 'git switch dev'); commitFile(sim, 'dev.txt', 'dev');
+  run(sim, 'git branch very-long-branch-name-for-label-clearance');
+  run(sim, 'git switch main'); run(sim, 'git merge dev');
+  assertLabelsClear(view, sim.state);
 });
