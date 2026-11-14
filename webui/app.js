@@ -7,6 +7,7 @@
   let lesson = new GitLessons.Practice(sim.scene, sim.snapshot());
   let selectedFile = 'hello.txt', selectedCommit = null, dirty = false, history = [], historyIndex = 0, draft = '', lastResult = null, replayTimer = null;
   const graph = new CommitGraph($('graph'), showCommit);
+  const graphViewer = new GitGraphViewer(graph, $('graph-stage'), () => ({ state: sim.state, title: SCENES[sim.scene].title }), cancelReplay);
   const assistant = new GitCommandAssist.Controller($('command'), assistContext);
   const lessonView = new GitLessons.View($('graph-stage'), fillCommand, route => { lesson.route = route; renderLesson(); });
   const labels = ['编辑与提交', '分叉与汇合', '解决同一行冲突', '改变提交的基点', '理解三种模式', '本地与远程同步'];
@@ -366,7 +367,7 @@
   $('replay').addEventListener('click', replay); $('restart').addEventListener('click', () => loadScene(sim.scene));
   $('help-button').addEventListener('click', () => $('help-dialog').showModal()); $('close-help').addEventListener('click', () => $('help-dialog').close());
   $('help-dialog').addEventListener('click', event => { if (event.target === $('help-dialog')) { const rect = $('help-dialog').getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) $('help-dialog').close(); } });
-  document.addEventListener('keydown', event => { if (event.key === '?' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) && !$('help-dialog').open) $('help-dialog').showModal(); });
+  document.addEventListener('keydown', event => { if (event.key === '?' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) && !$('help-dialog').open && !graphViewer.dialog.open) $('help-dialog').showModal(); });
   $('zoom-in').addEventListener('click', () => graph.setZoom(graph.zoom + .2)); $('zoom-out').addEventListener('click', () => graph.setZoom(graph.zoom - .2)); $('zoom-reset').addEventListener('click', () => graph.setZoom(1));
   window.addEventListener('resize', () => graph.resize());
   loadScene('basic');

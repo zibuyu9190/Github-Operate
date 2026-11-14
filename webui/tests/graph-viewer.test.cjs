@@ -1,0 +1,104 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { Simulator } = require('../simulator.js');
+
+/** 只验证弹窗的 DOM 搬移、事件和状态恢复；原生焦点限制与实际排版另用浏览器检查。 */
+function fixture() {
+  let document;
+  class Element {
+    constructor(tag) {
+      this.tag = tag; this.children = []; this.attrs = {}; this.events = {}; this.classes = new Set();
+      this.classList = { add: name => this.classes.add(name), remove: name => this.classes.delete(name) };
+      this.clientWidth = 600; this.clientHeight = 300; this.scrollTop = 0; this.scrollLeft = 0;
+    }
+    append(...children) {
+      for (const item of children) {
+        if (item.parentNode) item.parentNode.children.splice(item.parentNode.children.indexOf(item), 1);
+        item.parentNode = this; this.children.push(item);
+      }
+    }
+    before(item) { item.parentNode = this.parentNode; this.parentNode.children.splice(this.parentNode.children.indexOf(this), 0, item); }
+    replaceWith(item) {
+      if (item.parentNode) item.parentNode.children.splice(item.parentNode.children.indexOf(item), 1);
+      const parent = this.parentNode; parent.children.splice(parent.children.indexOf(this), 1, item); item.parentNode = parent; this.parentNode = null;
+    }
+    replaceChildren(...items) { this.children.forEach(item => { item.parentNode = null; }); this.children = []; this.append(...items); }
+    setAttribute(name, value) { this.attrs[name] = value; }
+    addEventListener(name, callback) { (this.events[name] ||= []).push(callback); }
+    fire(name, values = {}) { for (const callback of this.events[name] || []) callback({ target: this, ...values }); }
+    getBoundingClientRect() { return { left: 10, top: 10, right: 610, bottom: 310 }; }
+    querySelector() { return null; }
+    closest() { return this.tag === 'g' ? this : null; }
+    focus() { document.activeElement = this; }
+    get isConnected() { return this === document.body || Boolean(this.parentNode?.isConnected); }
+    showModal() { this.open = true; }
+    close() { this.open = false; this.fire('close'); }
+  }
+  const toolbar = new Element('div'), parent = new Element('section'), stage = new Element('div'), svg = new Element('svg'), details = new Element('details');
+  document = { body: new Element('body'), createElement: tag => new Element(tag), createComment: () => new Element('#comment'), querySelector: () => toolbar };
+  document.body.append(toolbar, parent); parent.append(stage, details); stage.append(svg); document.activeElement = stage;
+  const context = vm.createContext({ document, window: { getSelection: () => ({ toString: () => '' }) } });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../graph-viewer.js'), 'utf8'), context);
+  const sim = new Simulator('branches'), before = sim.snapshot(), selections = []; let prepares = 0;
+  const graph = { zoom: 1.8, onSelect: commit => selections.push(commit.id), draw() {}, resize() {}, setZoom(value) { this.zoom = Math.max(.6, Math.min(2.5, value)); } };
+  const viewer = new context.GitGraphViewer(graph, stage, () => ({ title: '分支与合并', state: sim.state }), () => { prepares++; });
+  return { viewer, graph, stage, svg, details, parent, document, sim, before, selections, prepares: () => prepares, Element };
+}
+
+test('重复打开关闭大图只搬移原画布，不复制 SVG，保留仓库、缩放与滚动位置', () => {
+  const f = fixture(); f.stage.scrollLeft = 23; f.stage.scrollTop = 79;
+  for (let n = 0; n < 3; n++) {
+    f.viewer.open(); f.viewer.open();
+    assert.equal(f.viewer.canvas.children[0], f.stage); assert.equal(f.stage.children[0], f.svg); assert.equal(f.graph.zoom, 1);
+    f.viewer.zoomIn.fire('click'); f.stage.scrollTop = 200; f.stage.scrollLeft = 100;
+    f.viewer.closeButton.fire('click');
+    assert.deepEqual(f.parent.children, [f.stage, f.details]); assert.equal(f.graph.zoom, 1.8);
+    assert.equal(f.stage.scrollLeft, 23); assert.equal(f.stage.scrollTop, 79); assert.equal(f.document.activeElement, f.stage);
+    assert.equal(f.document.body.classes.has('graph-viewer-open'), false); assert.deepEqual(f.sim.snapshot(), f.before);
+  }
+  assert.equal(f.prepares(), 3);
+});
+
+test('画布与独立按钮均能打开，键盘仅处理画布本身，滚动条点击不误触发', () => {
+  const f = fixture();
+  f.stage.fire('click', { clientX: 620, clientY: 20 }); assert.ok(!f.viewer.dialog.open);
+  f.stage.fire('click', { clientX: 40, clientY: 40 }); assert.equal(f.viewer.dialog.open, true); f.viewer.dialog.close();
+  let prevented = false;
+  f.stage.fire('keydown', { key: 'Enter', preventDefault: () => { prevented = true; } });
+  assert.equal(prevented, true); assert.equal(f.viewer.dialog.open, true); f.viewer.dialog.close();
+  f.stage.fire('keydown', { key: 'Enter', target: f.svg, preventDefault() { throw new Error('不能截获节点按键'); } });
+  assert.equal(f.viewer.dialog.open, false); f.viewer.trigger.fire('click'); assert.equal(f.viewer.dialog.open, true);
+  assert.equal(f.viewer.trigger.attrs['aria-haspopup'], 'dialog');
+});
+
+test('弹窗内点击不误关，遮罩点击关闭后可恢复，缩放端点正确禁用按钮', () => {
+  const f = fixture(); f.viewer.open();
+  f.viewer.dialog.fire('click', { clientX: 40, clientY: 40 }); assert.equal(f.viewer.dialog.open, true);
+  f.viewer.zoom(.6); assert.equal(f.viewer.zoomOut.disabled, true); assert.equal(f.viewer.zoomIn.disabled, false);
+  f.viewer.zoom(2.5); assert.equal(f.viewer.zoomIn.disabled, true); assert.equal(f.viewer.zoomLabel.textContent, '250%');
+  f.viewer.dialog.fire('click', { clientX: 0, clientY: 0 });
+  assert.equal(f.viewer.dialog.open, false); assert.equal(f.stage.parentNode, f.parent);
+});
+
+test('关闭事件延迟时立即重开，大图仍保留在弹窗内，最终恢复原位置和缩放', () => {
+  const f = fixture(); f.viewer.open();
+  f.viewer.dialog.open = false; // 模拟原生 close() 已关闭，但 close 事件尚未派发。
+  f.viewer.open(); f.viewer.dialog.fire('close');
+  assert.equal(f.viewer.dialog.open, true); assert.equal(f.stage.parentNode, f.viewer.canvas);
+  f.viewer.dialog.close();
+  assert.deepEqual(f.parent.children, [f.stage, f.details]); assert.equal(f.graph.zoom, 1.8);
+});
+
+test('节点仍调用原快照回调，弹窗就地显示纯文本快照，文件中的 HTML 不生成元素', () => {
+  const f = fixture(), commit = { id: 'C9', hash: 'test', message: '<img src=x>', parents: ['C1'], tree: { '<script>.txt': '<img onerror=alert(1)>' } };
+  f.viewer.open(); f.graph.onSelect(commit, true);
+  assert.deepEqual(f.selections, ['C9']); assert.equal(f.viewer.details.open, true);
+  assert.equal(f.viewer.summary.textContent, 'C9 · <img src=x>（仅远程）');
+  assert.equal(f.viewer.content.children[1].textContent, '<script>.txt');
+  assert.equal(f.viewer.content.children[2].tag, 'pre'); assert.equal(f.viewer.content.children[2].textContent, '<img onerror=alert(1)>');
+  f.viewer.dialog.close(); f.viewer.open();
+  assert.equal(f.viewer.details.open, false); assert.equal(f.viewer.content.children.length, 0);
+});
