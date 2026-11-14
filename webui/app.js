@@ -171,10 +171,7 @@
 
   function showCommit(commit, remoteOnly, expand = true) {
     selectedCommit = commit.id; $('commit-summary').textContent = commit.id + ' · ' + commit.message + (remoteOnly ? '（仅远程）' : '');
-    const content = $('commit-content'); content.replaceChildren();
-    content.append(node('p', '', '模拟短 ID：' + commit.hash + ' · 父提交：' + (commit.parents.join('、') || '无（初始提交）')));
-    for (const [path, text] of Object.entries(commit.tree)) content.append(node('strong', '', path), node('pre', '', text || '（空文件）'));
-    if (!Object.keys(commit.tree).length) content.append(node('p', '', '空文件树'));
+    GitGraphViewer.renderCommit($('commit-content'), commit, sim.state);
     if (expand) $('commit-detail').open = true;
   }
 
@@ -424,6 +421,7 @@
   $('remote-commit').addEventListener('click', () => {
     cancelReplay(); const before = sim.snapshot(), result = sim.simulateRemote();
     terminalEntry('☁ 虚拟协作者', result.output); render(true); updateExplanation(result, '远程新增了一次提交');
+    showCommit(sim.state.remote.commits[result.commitId], true);
     lastResult = { ...result, before, after: sim.snapshot() }; $('replay').disabled = false;
   });
   $('replay').addEventListener('click', replay); $('restart').addEventListener('click', () => loadScene(sim.scene));

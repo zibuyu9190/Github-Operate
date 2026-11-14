@@ -742,10 +742,18 @@
     /** 虚拟协作者独立推进远程分支；本地 origin/* 必须等 fetch 后才会变化。 */
     simulateRemote() {
       const branch = this.state.remote.branches.main ? 'main' : Object.keys(this.state.remote.branches)[0];
-      const old = this.state.remote.branches[branch], tree = clone(this.state.remote.commits[old].tree);
-      tree['team.txt'] = (tree['team.txt'] || '团队协作记录\n') + '协作者更新 ' + this.state.nextId + '\n';
-      const id = this.newCommit(tree, [old], '协作者：更新团队记录', true); this.state.remote.branches[branch] = id;
-      return { ok: true, output: '虚拟远程 ' + branch + ' 新增 ' + id, explanation: '远程已经变化，本地 origin/' + branch + ' 仍停在上次同步的位置。试试 git fetch。' };
+      const old = this.state.remote.branches[branch], previous = this.state.remote.commits[old].tree, tree = clone(previous);
+      const path = 'team.txt', added = '协作者更新 ' + this.state.nextId;
+      const content = own(tree, path) ? tree[path] : '团队协作记录\n';
+      // 在远程快照末尾追加独立一行，不读取或保存本地工作区及编辑草稿。
+      tree[path] = content + (content && !content.endsWith('\n') ? '\n' : '') + added + '\n';
+      const message = '协作者：在 team.txt 追加“' + added + '”';
+      const id = this.newCommit(tree, [old], message, true); this.state.remote.branches[branch] = id;
+      return {
+        ok: true, commitId: id,
+        output: '虚拟远程 ' + branch + ' 新增 ' + id + '\n提交说明：' + message + '\n本次文件变更：\n' + treeDiff(previous, tree),
+        explanation: '协作者已在远程 team.txt 追加一行“' + added + '”。本地 origin/' + branch + '、工作区和暂存区尚未变化；fetch 下载提交，pull 才整合到本地文件。'
+      };
     }
 
     /** 六个场景均从同一个小型文本仓库派生，场景预置不伪装成用户执行的命令。 */

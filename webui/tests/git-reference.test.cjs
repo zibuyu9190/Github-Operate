@@ -199,7 +199,7 @@ test('真实 Git 对照：离线裸仓库 fetch、pull 两种整合及 push 拒�
     f.git(['init', '--bare', '-b', 'main', remotePath]); f.git(['remote', 'add', 'origin', remotePath]); f.command('push', '-u', 'origin', 'main');
     f.git(['clone', remotePath, collaborator]);
     fs.writeFileSync(path.join(collaborator, 'team.txt'), '团队协作记录\n协作者更新 ' + f.sim.state.nextId + '\n', 'utf8');
-    f.git(['add', '.'], false, collaborator); f.git(['commit', '-m', '协作者：更新团队记录'], false, collaborator); f.git(['push', 'origin', 'main'], false, collaborator);
+    f.git(['add', '.'], false, collaborator); f.git(['commit', '-m', '协作者：在 team.txt 追加“协作者更新 ' + f.sim.state.nextId + '”'], false, collaborator); f.git(['push', 'origin', 'main'], false, collaborator);
     f.sim.simulateRemote();
     f.edit('notes.txt', '本地修改\n'); f.commit('本地提交'); assert.equal(f.command('push').ok, false);
     const before = f.sim.headId(); f.command('fetch'); assert.equal(f.sim.headId(), before);

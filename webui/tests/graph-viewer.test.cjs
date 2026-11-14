@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { Simulator } = require('../simulator.js');
+const { Simulator, edits } = require('../simulator.js');
 
 /** 只验证弹窗的 DOM 搬移、事件和状态恢复；原生焦点限制与实际排版另用浏览器检查。 */
 function fixture() {
@@ -40,7 +40,7 @@ function fixture() {
   const toolbar = new Element('div'), parent = new Element('section'), stage = new Element('div'), svg = new Element('svg'), details = new Element('details');
   document = { body: new Element('body'), createElement: tag => new Element(tag), createComment: () => new Element('#comment'), querySelector: () => toolbar };
   document.body.append(toolbar, parent); parent.append(stage, details); stage.append(svg); document.activeElement = stage;
-  const context = vm.createContext({ document, window: { getSelection: () => ({ toString: () => '' }) } });
+  const context = vm.createContext({ document, GitSimulator: { edits }, window: { getSelection: () => ({ toString: () => '' }) } });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../graph-viewer.js'), 'utf8'), context);
   const sim = new Simulator('branches'), before = sim.snapshot(), selections = []; let prepares = 0;
   const graph = { zoom: 1.8, onSelect: commit => selections.push(commit.id), draw() {}, resize() {}, setZoom(value) { this.zoom = Math.max(.6, Math.min(2.5, value)); } };
@@ -97,8 +97,72 @@ test('节点仍调用原快照回调，弹窗就地显示纯文本快照，文�
   f.viewer.open(); f.graph.onSelect(commit, true);
   assert.deepEqual(f.selections, ['C9']); assert.equal(f.viewer.details.open, true);
   assert.equal(f.viewer.summary.textContent, 'C9 · <img src=x>（仅远程）');
-  assert.equal(f.viewer.content.children[1].textContent, '<script>.txt');
-  assert.equal(f.viewer.content.children[2].tag, 'pre'); assert.equal(f.viewer.content.children[2].textContent, '<img onerror=alert(1)>');
+  const elements = descendants(f.viewer.content);
+  assert.ok(elements.some(item => item.textContent === '新增 · <script>.txt'));
+  assert.ok(elements.some(item => item.className?.includes('commit-diff-added') && item.textContent === '+ <img onerror=alert(1)>'));
+  assert.equal(elements.some(item => ['img', 'script'].includes(item.tag)), false);
   f.viewer.dialog.close(); f.viewer.open();
   assert.equal(f.viewer.details.open, false); assert.equal(f.viewer.content.children.length, 0);
+});
+
+function descendants(element) { return element.children.flatMap(child => [child, ...descendants(child)]); }
+
+test('远程节点优先展示本次新增行，连续提交与 fetch 后均以实际父提交为基准', () => {
+  const f = fixture(); f.viewer.open();
+  for (let index = 0; index < 2; index++) {
+    const order = f.sim.state.nextId, result = f.sim.simulateRemote();
+    const commit = f.sim.state.remote.commits[result.commitId];
+    f.graph.onSelect(commit, true);
+    const elements = descendants(f.viewer.content);
+    const added = elements.filter(item => item.className?.includes('commit-diff-added')).map(item => item.textContent);
+    assert.deepEqual(added, index === 0 ? ['+ 团队协作记录', '+ 协作者更新 ' + order] : ['+ 协作者更新 ' + order]);
+    assert.equal(f.viewer.content.children.at(-1).className, 'commit-full-snapshot');
+    assert.ok(!f.viewer.content.children.at(-1).open);
+    assert.equal(f.viewer.details.scrollTop, 0);
+    f.sim.execute('git fetch'); f.graph.onSelect(f.sim.state.commits[commit.id], false);
+    assert.deepEqual(descendants(f.viewer.content).filter(item => item.className?.includes('commit-diff-added')).map(item => item.textContent), added);
+  }
+});
+
+test('内容替换、整文件删除与空文件新增分别标记，初始和空改动提交明确说明', () => {
+  const f = fixture();
+  const original = f.sim.headId(), oldText = f.sim.headTree()['hello.txt'];
+  f.sim.editFile('hello.txt', '新问候\n'); f.sim.deleteFile('notes.txt'); f.sim.editFile('empty.txt', '');
+  f.sim.execute('git add .'); f.sim.execute('git commit -m "修改及删除"');
+  f.viewer.showCommit(f.sim.state.commits[f.sim.headId()], false);
+  const elements = descendants(f.viewer.content);
+  assert.ok(elements.some(item => item.textContent === '修改 · hello.txt'));
+  assert.ok(elements.some(item => item.textContent === '删除 · notes.txt'));
+  assert.ok(elements.some(item => item.textContent === '新增 · empty.txt'));
+  assert.ok(elements.some(item => item.textContent === '新增空文件'));
+  assert.ok(elements.some(item => item.className?.includes('commit-diff-removed') && item.textContent === '− ' + oldText.split('\n')[0]));
+  assert.ok(elements.some(item => item.className?.includes('commit-diff-added') && item.textContent === '+ 新问候'));
+  const root = f.sim.state.commits.C0; f.viewer.showCommit(root, false);
+  assert.ok(descendants(f.viewer.content).some(item => item.textContent?.includes('相对空仓库')));
+  f.viewer.showCommit({ ...root, parents: [original], tree: f.sim.state.commits[original].tree }, false);
+  assert.ok(descendants(f.viewer.content).some(item => item.textContent === '本次提交没有文件内容变化。'));
+});
+
+test('合并节点对比第一父提交，缺失父快照不伪造全部新增', () => {
+  const f = fixture(), first = f.sim.headId();
+  const result = f.sim.execute('git merge bugFix'); assert.equal(result.ok, true);
+  const commit = f.sim.state.commits[f.sim.headId()];
+  assert.equal(commit.parents[0], first); f.viewer.showCommit(commit, false);
+  const elements = descendants(f.viewer.content);
+  assert.ok(elements.some(item => item.textContent?.includes('相对第一父提交 ' + first)));
+  assert.ok(elements.some(item => item.textContent === '修改 · hello.txt'));
+  assert.ok(!elements.some(item => item.textContent === '修改 · notes.txt'));
+  f.viewer.showCommit({ ...commit, parents: ['C999'] }, true);
+  assert.ok(descendants(f.viewer.content).some(item => item.textContent === '父提交快照不可用，请查看完整文件快照。'));
+  assert.equal(descendants(f.viewer.content).some(item => item.className?.includes('commit-diff-added')), false);
+});
+
+test('与对象原型同名的普通文件仍按新增文本显示，快照与仓库保持只读', () => {
+  const f = fixture(), before = f.sim.snapshot(), tree = { ...f.sim.headTree(), toString: '普通文本文件\n' };
+  const commit = { id: 'C99', hash: 'test', parents: [f.sim.headId()], message: '新增特殊名称文件', tree };
+  f.viewer.showCommit(commit, true);
+  const elements = descendants(f.viewer.content);
+  assert.ok(elements.some(item => item.textContent === '新增 · toString'));
+  assert.ok(elements.some(item => item.className?.includes('commit-diff-added') && item.textContent === '+ 普通文本文件'));
+  assert.deepEqual(f.sim.snapshot(), before);
 });

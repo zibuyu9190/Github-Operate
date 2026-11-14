@@ -152,6 +152,34 @@ test('远程实际状态独立推进，fetch 仅更新对象及 tracking', () =>
   assert.equal(sim.state.tracking.main, remote); assert.equal(sim.headId(), before.branches.main); assert.deepEqual(sim.state.work, before.work);
 });
 
+test('一键模拟远程追加真实文件内容，说明与逐行输出对应，连续提交不改本地快照', () => {
+  const sim = new Simulator();
+  sim.editFile('hello.txt', '已暂存\n'); run(sim, 'git add hello.txt'); sim.editFile('hello.txt', '尚未暂存\n');
+  const before = sim.snapshot();
+  for (let index = 0; index < 2; index++) {
+    const prior = sim.state.remote.branches.main, priorTree = structuredClone(sim.state.remote.commits[prior].tree);
+    const order = sim.state.nextId, result = sim.simulateRemote(), commit = sim.state.remote.commits[result.commitId];
+    assert.equal(result.ok, true); assert.deepEqual(commit.parents, [prior]);
+    assert.equal(commit.tree['team.txt'], (priorTree['team.txt'] || '团队协作记录\n') + '协作者更新 ' + order + '\n');
+    assert.equal(commit.message, '协作者：在 team.txt 追加“协作者更新 ' + order + '”');
+    assert.ok(result.output.includes(commit.message)); assert.ok(result.output.includes('+协作者更新 ' + order));
+    assert.equal(result.output.includes('+团队协作记录'), index === 0);
+    assert.deepEqual(sim.state.remote.commits[prior].tree, priorTree);
+    for (const key of Object.keys(before).filter(key => !['remote', 'nextId'].includes(key))) assert.deepEqual(sim.state[key], before[key], key);
+  }
+});
+
+test('远程追加保留既有空文件，原末行没有换行时仍新增独立一行', () => {
+  for (const content of ['', '已有记录']) {
+    const sim = new Simulator(); change(sim, 'team.txt', content); run(sim, 'git push');
+    const order = sim.state.nextId, result = sim.simulateRemote();
+    assert.equal(sim.state.remote.commits[result.commitId].tree['team.txt'], (content ? content + '\n' : '') + '协作者更新 ' + order + '\n');
+    assert.equal(sim.state.work['team.txt'], content);
+    run(sim, 'git fetch'); assert.equal(sim.state.work['team.txt'], content);
+    run(sim, 'git pull'); assert.equal(sim.state.work['team.txt'], sim.state.remote.commits[result.commitId].tree['team.txt']);
+  }
+});
+
 for (const rebase of [false, true]) test('非快进推送拒绝，pull ' + (rebase ? '--rebase' : '--no-rebase') + ' 整合后可推送', () => {
   const sim = new Simulator('remote'); assert.equal(sim.execute('git push').ok, false);
   run(sim, 'git pull ' + (rebase ? '--rebase' : '--no-rebase') + ' origin main'); run(sim, 'git push');

@@ -3,6 +3,47 @@
   'use strict';
 
   class GraphViewer {
+    /** 主页面与放大图共用差异视图；合并提交以第一父提交为基准，新增/删除同时用文字和颜色标明。 */
+    static renderCommit(container, commit, state) {
+      const make = (tag, className, text) => {
+        const item = document.createElement(tag); item.className = className;
+        if (text !== undefined) item.textContent = text;
+        return item;
+      };
+      const parentId = commit.parents[0], parent = state.commits[parentId] || state.remote.commits[parentId];
+      container.replaceChildren(make('p', '', '模拟短 ID：' + commit.hash + ' · 父提交：' + (commit.parents.join('、') || '无（初始提交）')));
+      if (parentId && !parent) {
+        container.append(make('p', '', '父提交快照不可用，请查看完整文件快照。'));
+      } else {
+        const baseline = parent?.tree || {};
+        // 文件名可能与对象原型属性同名，只读取快照中实际存在的文件。
+        const textAt = (tree, path) => Object.prototype.hasOwnProperty.call(tree, path) ? tree[path] : undefined;
+        const changed = [...new Set([...Object.keys(baseline), ...Object.keys(commit.tree)])].sort().filter(path => textAt(baseline, path) !== textAt(commit.tree, path));
+        container.append(make('p', 'commit-diff-legend', '本次改动 · ' + (parentId ? '相对第一父提交 ' + parentId : '相对空仓库') + ' · + 绿色新增 / − 红色删除'));
+        if (!changed.length) container.append(make('p', '', '本次提交没有文件内容变化。'));
+        for (const path of changed) {
+          const before = textAt(baseline, path), after = textAt(commit.tree, path);
+          const section = make('div', 'commit-change');
+          section.append(make('strong', 'commit-change-title', (before === undefined ? '新增' : after === undefined ? '删除' : '修改') + ' · ' + path));
+          const preview = make('pre', 'commit-diff'), original = (before || '').match(/[^\n]*\n|[^\n]+$/g) || [];
+          const changes = root.GitSimulator.edits(before, after);
+          for (const change of changes) {
+            preview.append(make('span', 'commit-diff-line commit-diff-hunk', '@@ 原文件第 ' + (change.start + 1) + ' 行 @@'));
+            for (const line of original.slice(change.start, change.end)) preview.append(make('span', 'commit-diff-line commit-diff-removed', '− ' + line.replace(/\n$/, '')));
+            for (const line of change.lines) preview.append(make('span', 'commit-diff-line commit-diff-added', '+ ' + line.replace(/\n$/, '')));
+          }
+          if (!changes.length) preview.append(make('span', 'commit-diff-line', after === undefined ? '删除空文件' : '新增空文件'));
+          section.append(preview); container.append(section);
+        }
+      }
+      // 完整快照折叠保留，优先让用户看见本次变化；文件与说明始终只进入文本节点。
+      const snapshot = make('details', 'commit-full-snapshot');
+      snapshot.append(make('summary', '', '完整文件快照（' + Object.keys(commit.tree).length + ' 个文件）'));
+      for (const [path, text] of Object.entries(commit.tree)) snapshot.append(make('strong', '', path), make('pre', '', text || '（空文件）'));
+      if (!Object.keys(commit.tree).length) snapshot.append(make('p', '', '空文件树'));
+      container.append(snapshot); container.scrollTop = 0;
+    }
+
     constructor(graph, stage, readContext, beforeOpen) {
       this.graph = graph; this.stage = stage; this.readContext = readContext; this.beforeOpen = beforeOpen;
       const make = (tag, className, text) => {
@@ -95,10 +136,9 @@
     /** 快照只用文本节点呈现，文件内容与提交说明不会作为 HTML 执行。 */
     showCommit(commit, remoteOnly) {
       this.summary.textContent = commit.id + ' · ' + commit.message + (remoteOnly ? '（仅远程）' : '');
-      this.content.replaceChildren(this.make('p', '', '模拟短 ID：' + commit.hash + ' · 父提交：' + (commit.parents.join('、') || '无（初始提交）')));
-      for (const [path, text] of Object.entries(commit.tree)) this.content.append(this.make('strong', '', path), this.make('pre', '', text || '（空文件）'));
-      if (!Object.keys(commit.tree).length) this.content.append(this.make('p', '', '空文件树'));
+      GraphViewer.renderCommit(this.content, commit, this.readContext().state);
       this.details.open = true;
+      this.details.scrollTop = 0;
       this.graph.resize();
     }
 

@@ -22,6 +22,20 @@ dialog.graph-viewer[open] { display: flex; flex-direction: column; }
 .graph-viewer-snapshot p { margin: 0 0 12px; color: #64788b; }
 .graph-viewer-snapshot strong { display: block; margin-top: 12px; overflow-wrap: anywhere; }
 .graph-viewer-snapshot pre { margin: 7px 0; padding: 10px 12px; border-radius: 6px; background: #f3f7fa; font: 12px/1.7 Consolas, 'Microsoft YaHei', monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* 差异只显示本次变更的行；纯文本符号与文件状态让信息不依赖颜色。 */
+#commit-content { max-height: 220px; }
+#commit-content .commit-diff-legend, .graph-viewer-snapshot .commit-diff-legend { margin: 4px 0; font-size: 11px; }
+.commit-change { min-width: 0; }
+.commit-change-title { display: block; margin: 6px 0 3px; overflow-wrap: anywhere; }
+#commit-content .commit-diff, .graph-viewer-snapshot .commit-diff { padding: 5px 0; margin: 3px 0 8px; }
+.commit-diff-line { display: block; min-height: 1.65em; padding: 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.commit-diff .commit-diff-added { background: #dcfce7; color: #166534; }
+.commit-diff .commit-diff-removed { background: #fee2e2; color: #991b1b; }
+.commit-diff .commit-diff-hunk { background: #e0f2fe; color: #075985; font-size: 11px; }
+.commit-full-snapshot { margin-top: 8px; }
+.commit-full-snapshot > summary { cursor: pointer; color: #34546a; }
+.commit-full-snapshot strong { display: block; margin: 8px 0 3px; overflow-wrap: anywhere; }
 @media (max-width: 680px) {
   dialog.graph-viewer { width: calc(100vw - 16px); height: calc(100dvh - 16px); max-height: calc(100dvh - 16px); border-radius: 10px; }
   .graph-viewer-header { padding: 12px; gap: 10px; }
