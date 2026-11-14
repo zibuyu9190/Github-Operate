@@ -18,7 +18,7 @@ test('解析引号、中文、空格文件名及空字符串，拒绝歧义参�
   assert.equal(parse('git commit -m "中文 \\"引号\\""'.replace(/\\\\/g, '\\')).name, 'commit');
   assert.equal(parse("git commit -m '中文说明'").message, '中文说明');
   assert.equal(parse('git reset HEAD~1').mode, 'mixed');
-  for (const command of ['git status --unknown', 'git merge --no-ff', 'git reset --hard --soft', 'git pull --rebase --no-rebase', 'git push -u origin', 'git add . && git commit', 'git commit -m "', 'git commit -m ""', 'git stash drop']) assert.throws(() => parse(command), command);
+  for (const command of ['git status --unknown', 'git merge --no-ff', 'git reset --hard --soft', 'git pull --rebase --no-rebase', 'git push -u origin', 'git add . && git commit', 'git commit -m "', 'git commit -m ""', 'git stash drop --all']) assert.throws(() => parse(command), command);
 });
 
 test('语法及语义错误均保持完整仓库状态，不留下半成品分支', () => {

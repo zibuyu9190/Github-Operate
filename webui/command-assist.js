@@ -7,13 +7,18 @@
     diff: ['查看文件差异', 'diff [--cached]'],
     show: ['查看提交说明和文件改动', 'show [引用]'],
     restore: ['取消暂存或丢弃未暂存修改', 'restore [--staged] <文件…> | restore [--staged] .'],
-    stash: ['临时保存与恢复改动', 'stash push [-u] [-m "说明"] | stash list | stash pop'],
+    stash: ['临时保存与恢复改动', 'stash push [-u] [-m "说明"] | stash list | stash (pop|apply|drop) [stash@{n}] | stash clear'],
     remote: ['查看虚拟远程仓库', 'remote [-v]'],
     add: ['暂存文件的当前内容', 'add <文件…> | add .'],
-    commit: ['把暂存区保存为提交', 'commit -m "提交说明"'],
-    branch: ['列出、创建或删除分支', 'branch [-a] [-vv] | branch <名称> | branch -d <名称>'],
-    switch: ['切换或创建本地分支', 'switch <分支> | switch -c <新分支>'],
-    checkout: ['切换分支或查看提交', 'checkout <引用> | checkout -b <新分支>'],
+    commit: ['保存提交或修订最近一次提交', 'commit [-a] -m "说明" | commit --amend (-m "说明" | --no-edit)'],
+    branch: ['列出、创建、改名或删除分支', 'branch [-a] [-vv] | branch <名称> [引用] | branch -m [旧名] <新名> | branch -d <名称>'],
+    switch: ['专门切换或创建分支', 'switch <分支> | switch -c <新分支> | switch - | switch --detach <引用>'],
+    checkout: ['切换分支、查看提交或恢复文件', 'checkout <引用> | checkout -b <新分支> | checkout [引用] -- <文件>'],
+    'cherry-pick': ['把指定提交的改动摘取到当前分支', 'cherry-pick <提交…> | cherry-pick (--continue | --abort | --skip)'],
+    reflog: ['查看本页面的 HEAD 更新记录', 'reflog [--oneline]；用 HEAD@{n} 找回历史位置'],
+    tag: ['列出、创建或删除本地版本标签', 'tag [名称 [引用]] | tag -a <名称> [引用] -m "说明" | tag -d <名称>'],
+    rm: ['删除跟踪文件并暂存，或仅取消跟踪', 'rm [--cached] <文件…>'],
+    mv: ['移动或改名普通文件', 'mv <来源文件> <目标文件>'],
     merge: ['合并另一条历史', 'merge [--no-ff] <引用> | merge --continue | merge --abort'],
     rebase: ['把提交重放到新基点', 'rebase <引用> | rebase --continue | rebase --abort'],
     reset: ['调整 HEAD、暂存区或工作区', 'reset [--soft | --mixed | --hard] [引用]'],
@@ -79,6 +84,8 @@
       for (const name of Object.keys(state.branches)) offer(name, name === state.head.branch ? '当前本地分支' : '本地分支', '分支');
       if (branchesOnly) return;
       for (const name of Object.keys(state.tracking)) offer('origin/' + name, '本地远程跟踪引用', '引用');
+      for (const name of Object.keys(state.tags || {})) offer(name, '本地版本标签', '标签');
+      (state.reflog || []).slice(0, 10).forEach((item, n) => offer('HEAD@{' + n + '}', item.message, '更新记录'));
       offer('HEAD', '当前提交', '引用');
       let id = headId(state);
       for (let n = 1; n <= 9; n++) {
@@ -88,7 +95,7 @@
       }
       if (state.commits[headId(state)]?.parents[1]) offer('HEAD^2', '合并提交的第二个父提交', '引用');
       for (const commit of Object.values(state.commits).sort((a, b) => b.order - a.order)) {
-        if (before[0] === 'revert' && commit.parents.length > 1) continue;
+        if (['revert', 'cherry-pick'].includes(before[0]) && commit.parents.length > 1) continue;
         offer(commit.id, commit.message, '提交');
         if (prefix && /^[0-9a-f]/.test(prefix)) offer(commit.hash, commit.message, '提交');
       }
@@ -123,8 +130,10 @@
         }
         case 'stash':
           if (!args.length) {
-            if (!state.pending) { offer('push', '临时保存改动'); if (state.stashes.length) offer('pop', '恢复最近一份；成功后移除记录，冲突时保留'); }
+            if (!state.pending) { offer('push', '临时保存改动'); if (state.stashes.length) { offer('pop', '恢复并移除记录，冲突时保留'); offer('apply', '恢复并保留记录'); offer('drop', '移除指定记录'); offer('clear', '移除所有虚拟 stash 记录'); } }
             offer('list', '列出暂存记录');
+          } else if (['pop', 'apply', 'drop'].includes(args[0]) && args.length === 1 && !state.pending) {
+            state.stashes.forEach((item, n) => offer('stash@{' + n + '}', item.message, '暂存记录'));
           } else if (args[0] === 'push' && !state.pending) {
             if (args.at(-1) === '-m') { if (!prefix) offer('', '在引号内填写暂存说明', '说明', 'message'); }
             else {
@@ -139,28 +148,47 @@
           break;
         }
         case 'commit':
-          if (!args.length) offer('-m', '填写本次提交说明');
-          else if (args.length === 1 && args[0] === '-m' && !prefix) offer('', '在引号内填写提交说明', '说明', 'message');
+          if (args.at(-1) === '-m' || args.at(-1) === '-am') { if (!prefix) offer('', '在引号内填写提交说明', '说明', 'message'); }
+          else { if (!args.includes('-m') && !args.includes('--no-edit') && !args.includes('-am')) offer('-m', '填写提交说明'); if (!args.includes('-a') && !args.includes('-am')) offer('-a', '自动暂存已跟踪文件，不包含未跟踪文件'); if (!args.includes('--amend')) offer('--amend', '用新提交替换最近提交的位置'); else if (!args.includes('-m')) offer('--no-edit', '沿用原提交说明'); }
           break;
         case 'branch':
-          if (!args.length) { offer('-d', '仅删除已合入的非当前分支'); options([['-a', '列出本地与远程跟踪分支'], ['-vv', '查看上游与领先/落后关系']]); newBranch(); }
+          if (!args.length) { offer('-d', '仅删除已合入的非当前分支'); offer('-m', '修改本地分支名称'); options([['-a', '列出本地与远程跟踪分支'], ['-vv', '查看上游与领先/落后关系']]); newBranch(); }
           else if (args.length === 1 && args[0] === '-d') {
             for (const name of Object.keys(state.branches)) if (name !== state.head.branch) offer(name, '待删除的本地分支，请确认已合入', '分支');
           }
           else if (args.every(x => ['-a', '-vv'].includes(x))) options([['-a', '列出本地与远程跟踪分支'], ['-vv', '查看上游与领先/落后关系']]);
+          else if (args[0] === '-m') { if (args.length === 1) refs(true); newBranch(); }
+          else if (args.length === 1 && !args[0].startsWith('-')) refs();
           break;
         case 'switch': case 'checkout':
-          if (!args.length) { offer(name === 'switch' ? '-c' : '-b', '创建并切换到新分支'); refs(name === 'switch'); }
+          if (name === 'checkout' && args.includes('--')) {
+            if (!args.includes('.')) offer('.', '恢复全部来源文件，不切换分支', '文件');
+            for (const file of context.files) if (!args.includes(file.path) && (args.indexOf('--') !== 0 || Object.hasOwn(state.index, file.path))) offer(file.path, '恢复文件内容，不切换分支', '文件');
+          } else if (!args.length) { offer(name === 'switch' ? '-c' : '-b', '创建并切换到新分支'); offer('--detach', '查看指定提交，进入分离 HEAD'); if (state.previousCheckout) offer('-', '回到上一次切换的位置'); if (name === 'checkout') offer('--', '恢复文件，不切换分支'); refs(name === 'switch'); }
           else if (args.length === 1 && args[0] === (name === 'switch' ? '-c' : '-b')) newBranch();
+          else if (args[0] === '--detach' && args.length === 1) refs();
           break;
-        case 'merge': case 'rebase': case 'revert':
+        case 'merge': case 'rebase': case 'revert': case 'cherry-pick':
           if (!args.length && state.pending?.type === name) {
-            if (!state.pending.unresolved.length) offer('--continue', '已暂存解决结果后继续');
+            if (!state.pending.unresolved.length && (name !== 'cherry-pick' || context.files.some(f => f.staged))) offer('--continue', '已暂存解决结果后继续');
             offer('--abort', '中止操作并恢复开始前的状态');
+            if (name === 'cherry-pick') offer('--skip', '丢弃当前摘取结果并继续后续提交');
           } else if (!state.pending && !positional.length && !args.some(x => x !== '--no-ff')) {
             if (name === 'merge' && !args.length) offer('--no-ff', '需要合并时创建双亲提交');
             refs();
           }
+          else if (name === 'cherry-pick' && !state.pending && args.every(x => !x.startsWith('-'))) refs();
+          break;
+        case 'rm': case 'mv':
+          if (name === 'rm' && !args.length) offer('--cached', '只取消跟踪，保留工作区文件');
+          if (name === 'rm' || args.length === 0) for (const file of context.files) if (Object.hasOwn(state.index, file.path) && !args.includes(file.path)) offer(file.path, '已跟踪文件', '文件');
+          break;
+        case 'tag':
+          if (!args.length) { offer('-l', '列出标签'); offer('-d', '删除本地标签'); offer('-a', '创建带说明的本地标签'); offer('v1.0', '可编辑版本号', '新标签'); }
+          else if (args[0] === '-d') for (const name of Object.keys(state.tags || {})) offer(name, '待删除的本地标签', '标签');
+          else if (args.at(-1) === '-m' && !prefix) offer('', '填写标签说明', '说明', 'message');
+          else if (args[0] === '-a') { if (args.length === 1) offer('v1.0', '可编辑版本号', '新标签'); else if (!args.includes('-m')) { offer('-m', '填写标签说明'); refs(); } }
+          else if (args.length === 1 && !args[0].startsWith('-')) refs();
           break;
         case 'reset':
           if (!args.some(x => x.startsWith('-'))) options([['--soft', '仅移动 HEAD，保留暂存区和工作区'], ['--mixed', '移动 HEAD 并重置暂存区，保留工作区'], ['--hard', '同时覆盖已跟踪的工作区改动，请谨慎']]);
@@ -202,7 +230,8 @@
       const remainingMarkers = Object.keys(op.conflicts).some(hasMarkers);
       const ready = changed.filter(f => !hasMarkers(f.path));
       if (ready.length) add('git add ' + ready.map(f => quote(f.path)).join(' '), '检查解决结果后，将这些文件标记为已解决');
-      if (op.type !== 'stash' && !op.unresolved.length && !changed.length && !remainingMarkers) add('git ' + op.type + ' --continue', '解决结果已暂存，继续完成本次操作');
+      if (op.type !== 'stash' && !op.unresolved.length && !changed.length && !remainingMarkers && (op.type !== 'cherry-pick' || staged)) add('git ' + op.type + ' --continue', '解决结果已暂存，继续完成本次操作');
+      if (op.type === 'cherry-pick') add('git cherry-pick --skip', '若当前改动为空或不需要此提交，跳过当前摘取');
       add('git status', remainingMarkers || op.unresolved.length ? '先在文件区解决冲突，再暂存解决结果' : '核对解决状态与暂存内容');
       if (op.type === 'stash') add('git stash list', '恢复发生冲突，原 stash 记录仍保留；解决后 add 即可');
       else add('git ' + op.type + ' --abort', '放弃本次操作，恢复开始前的仓库状态');

@@ -49,9 +49,9 @@
   function terminalEntry(command, output, result = null) {
     const entry = node('div', 'terminal-entry');
     const commandLine = node('div', 'terminal-command', command);
-    const type = !result ? '' : !result.ok ? 'terminal-error' : result.conflict ? 'terminal-conflict' : '';
+    const type = !result ? '' : !result.ok ? 'terminal-error' : result.conflict || result.paused ? 'terminal-conflict' : '';
     if (result) {
-      const status = !result.ok ? ['error', '✕ 失败'] : result.conflict ? ['conflict', '⚠ 待解决冲突'] : ['success', '✓ 成功'];
+      const status = !result.ok ? ['error', '✕ 失败'] : result.conflict ? ['conflict', '⚠ 待解决冲突'] : result.paused ? ['conflict', '⚠ 已暂停'] : ['success', '✓ 成功'];
       commandLine.append(node('span', 'terminal-command-status terminal-command-' + status[0], status[1]));
     }
     entry.append(commandLine, node('pre', 'terminal-output ' + type, output));
@@ -162,7 +162,7 @@
       $('conflict-title').textContent = op.unresolved.includes(selectedFile) ? '冲突待解决 · ' + selectedFile : '已暂存解决结果 · ' + selectedFile;
       $('conflict-tip').textContent = op.type === 'stash' ? '编辑工作区 → 保存 → git add；全部解决后即可正常提交，stash 记录仍保留' : '编辑工作区 → 保存 → git add → git ' + op.type + ' --continue';
       $('ours-label').textContent = op.type === 'rebase' ? '当前版本 · 新基点上的历史' : '当前版本 · HEAD';
-      $('theirs-label').textContent = op.type === 'rebase' ? '传入版本 · 待重放的提交' : '传入版本 · ' + (op.type === 'revert' ? '反向改动' : op.type === 'stash' ? 'stash 中的改动' : '另一分支');
+      $('theirs-label').textContent = ['rebase', 'cherry-pick'].includes(op.type) ? '传入版本 · 待重放的提交' : '传入版本 · ' + (op.type === 'revert' ? '反向改动' : op.type === 'stash' ? 'stash 中的改动' : '另一分支');
       $('conflict-base').textContent = conflict.base ?? '（此版本没有该文件）'; $('conflict-ours').textContent = conflict.ours ?? '（此版本删除了文件）'; $('conflict-theirs').textContent = conflict.theirs ?? '（此版本删除了文件）';
     }
     renderCode($('work-diff'), work, index, true);
@@ -201,8 +201,8 @@
       const labels = result.command.staged ? ['HEAD', '→', '暂存区', '· 工作区保留'] : ['暂存区', '→', '工作区', '· 丢弃未暂存修改'];
       labels.forEach((text, i) => $('flow').append(node('span', i === 2 ? 'flow-active' : '', text)));
     }
-    if (result.ok && result.command?.name === 'stash' && result.command.action !== 'list') {
-      const labels = result.command.action === 'push' ? ['工作区 / 暂存区', '→', 'stash@{0}'] : ['stash@{0}', '→', '工作区 / 暂存区'];
+    if (result.ok && result.command?.name === 'stash' && ['push', 'pop', 'apply'].includes(result.command.action)) {
+      const labels = result.command.action === 'push' ? ['工作区 / 暂存区', '→', 'stash@{0}'] : ['stash@{' + (result.command.index || 0) + '}', '→', '工作区 / 暂存区'];
       labels.forEach((text, i) => $('flow').append(node('span', i === 2 ? 'flow-active' : '', text)));
     }
     animateFiles(result);
@@ -249,7 +249,7 @@
     button.append(node('span', 'scene-index', String(i + 1).padStart(2, '0')), copy); button.addEventListener('click', () => loadScene(key)); $('scenes').append(button);
   });
   $('help-title').textContent = 'Git 命令手册与常用流程';
-  document.querySelector('#help-dialog > p').textContent = '单条命令可在网页内练习；含 && 的组合行供真实终端参考。点击模板或分步命令只会填入输入框，请检查后再按 Enter 执行。';
+  document.querySelector('#help-dialog > p').textContent = '点击命令示例只会填入输入框，再按 Enter 执行；标为“仅供参考”的条目与含 && 的组合行供真实终端使用。';
 
   /** 占位符用于讲解语法；点击时改用有效示例并选中变量，避免把尖括号当成实际参数。 */
   const templates = [
@@ -311,7 +311,7 @@
     ['虚拟远程协作', [['git remote -v', '查看虚拟 origin；不读取真实仓库地址'], ['git fetch origin', '只下载对象、更新 origin/*'], ['git pull', '先 fetch，再 merge；需要已配置上游'], ['git pull --no-rebase origin main', '明确使用合并'], ['git pull --rebase origin main', '明确使用变基'], ['git push', '推送到当前分支的上游'], ['git push origin main', '推送指定同名分支'], ['git push -u origin bugFix', '推送并设置上游']]],
     ['提交引用', [['git checkout HEAD~1', '第一父链向前一代，支持 HEAD~n'], ['git checkout HEAD^', '默认第一个父提交；也可用 ^2'], ['git checkout 0000001', '模拟短 ID；也可直接用 C0'], ['git merge origin/main', '使用最近 fetch 的本地远程跟踪引用']]]
   ];
-  const stashNote = node('p', 'help-note', '练习边界：restore 支持明确文件名和 .，冲突中请编辑后 add。stash pop 只恢复最近一份，要求已跟踪文件和暂存区干净；不支持 --index、apply、drop。stash 使用独立快照保存，不在提交图中新增普通提交；刷新或切换场景会清空。参考：');
+  const stashNote = node('p', 'help-note', '练习边界：restore 支持明确文件名和 .，冲突中请编辑后 add。stash pop/apply 可指定 stash@{n}，要求已跟踪文件和暂存区干净；不支持 --index。apply 保留记录，pop 成功后移除；drop/clear 只移除记录。stash 使用独立快照保存，不在提交图中新增普通提交；刷新或切换场景会清空。参考：');
   for (const name of ['restore', 'stash', 'show', 'branch', 'remote']) {
     const link = node('a', '', 'Git ' + name + ' '); link.href = 'https://git-scm.com/docs/git-' + name; link.target = '_blank'; link.rel = 'noopener noreferrer'; stashNote.append(link);
   }
@@ -321,6 +321,68 @@
     for (const [command, description] of rows) { const row = node('div', 'help-row'); row.append(commandButton(command), node('span', '', description)); group.append(row); }
     $('help-content').append(group);
   }
+  // 补充手册与已有分类布局解耦；搜索初始化前构建，所有新增条目都可被搜索。
+  const dailyGroup = node('section', 'help-group help-card');
+  dailyGroup.append(node('h3', '', '摘取提交与更多日常操作'));
+  const dailyCommands = [
+    ['git cherry-pick bugFix', '把 bugFix 最新普通提交的改动摘取到当前分支；可在“分支与合并”中单独尝试，摘取不等同于该关合并路线的验收。'],
+    ['git cherry-pick C1 C2', '按输入顺序摘取多个普通提交；先用 show 确认要拿的改动。'],
+    ['git cherry-pick --continue', '编辑冲突、保存并 add 后继续；后续提交仍可能冲突。'],
+    ['git cherry-pick --skip', '丢弃当前摘取结果，跳过当前提交；空改动也可跳过。'],
+    ['git cherry-pick --abort', '恢复整批摘取开始前的位置和文件。'],
+    ['git commit -am "修改已跟踪文件"', '自动暂存已跟踪文件的修改、删除并提交；不包含未跟踪的新文件。'],
+    ['git commit --amend -m "更新提交说明"', '替换最近一次提交；用暂存区内容和原父提交创建新 ID，改写前先核对是否已共享。'],
+    ['git commit --amend --no-edit', '补充暂存的改动，沿用最近一次提交说明。'],
+    ['git branch -m feature-renamed', '修改当前本地分支名称，原上游配置保留。'],
+    ['git branch rescue HEAD@{1}', '在此前的 HEAD 位置创建救援分支，不切换当前分支。'],
+    ['git switch -', '回到上一次分支切换的位置。'],
+    ['git switch --detach HEAD~1', '直接查看某个提交，进入分离 HEAD；可用 switch -c 保存后续开发。'],
+    ['git checkout -- hello.txt', '从暂存区恢复工作区文件，相当于 git restore hello.txt。'],
+    ['git checkout HEAD -- hello.txt', '同时把暂存区和工作区中的该文件恢复为 HEAD；不会切换分支。'],
+    ['git rm hello.txt', '删除工作区与暂存项并暂存删除；存在未提交修改时会保护性拒绝。'],
+    ['git rm --cached hello.txt', '仅取消跟踪，工作区文件保留；不等于取消暂存。'],
+    ['git mv hello.txt greeting.txt', '移动文件并暂存路径变化；原未暂存内容仍未暂存。'],
+    ['git tag', '列出本地版本标签。'],
+    ['git tag v1.0', '给当前提交打轻量标签；标签不会随分支前进。'],
+    ['git tag -a v1.1 -m "版本说明"', '添加带说明的本地标签；教学版只存说明，不模拟独立 tag 对象或签名。'],
+    ['git tag -d v1.0', '删除本地标签，不删除提交。'],
+    ['git reflog', '列出当前会话每条命令的最终 HEAD 位置，批量操作的内部移动不逐步记录；可用 HEAD@{n} 找回位置。'],
+    ['git stash apply', '恢复最近一份临时改动，并保留记录。'],
+    ['git stash pop stash@{1}', '恢复第二份记录，成功后移除；编号会随保存和删除变化。'],
+    ['git stash drop stash@{0}', '删除指定的虚拟临时记录，文件与提交不变。'],
+    ['git stash clear', '清空全部虚拟临时记录。']
+  ];
+  for (const [command, description] of dailyCommands) { const row = node('div', 'help-row'); row.append(commandButton(command), node('span', '', description)); dailyGroup.append(row); }
+  const comparison = node('section', 'help-group help-card');
+  comparison.append(node('h3', '', 'checkout、switch、restore 怎么选？'), node('p', 'help-note help-row', '切换分支：git checkout main 与 git switch main 对应；创建并切换：git checkout -b feature 与 git switch -c feature 对应。switch 专门管理分支切换，restore 专门恢复文件。checkout 兼有这两类用途；不能把所有 checkout 都直接替换成 switch。'));
+  const reference = node('section', 'help-group help-card');
+  reference.append(node('h3', '', '真实终端常用命令 · 仅供参考'), node('p', 'help-note', '以下写法依赖真实磁盘、网络、账号或更复杂的 Git 功能，网页不会执行。复制到自己的终端前替换占位符并核对目标；不会连接或修改你的真实仓库。'));
+  const externalCommands = [
+    ['git init -b main', '在当前目录初始化真实仓库。', 'git-init'],
+    ['git clone <repository-url>', '下载仓库并自动配置 origin；地址由项目提供。', 'git-clone'],
+    ['git config --global user.name "你的名字"', '设置后续真实提交的作者姓名，非登录账号。', 'git-config'],
+    ['git config --global user.email "你的邮箱"', '设置提交邮箱；查看配置用 git config --list。', 'git-config'],
+    ['git remote add origin <repository-url>', '给真实仓库添加远程；已有 origin 时用 remote set-url origin <repository-url>。', 'git-remote'],
+    ['git fetch --prune origin', '获取更新，并清理远端已删除分支对应的本地跟踪引用。', 'git-fetch'],
+    ['git push origin --delete <branch-name>', '删除远程分支，先确认团队不再使用。', 'git-push'],
+    ['git push origin --tags', '推送本地标签；网页标签只保存在虚拟仓库。', 'git-push'],
+    ['git log -p -- <file-path>', '查看某个文件的提交历史和补丁；-- 之后是路径。', 'git-log'],
+    ['git diff <commit-a> <commit-b>', '比较两个提交的内容。网页 diff 仅支持工作区和暂存区的基础对比。', 'git-diff'],
+    ['git cherry -v origin/main', '按补丁等价性检查哪些改动尚未进入上游；与 cherry-pick 的摘取用途不同。', 'git-cherry'],
+    ['git blame -- <file-path>', '查看各行最近一次修改的提交来源。', 'git-blame'],
+    ['git rebase -i HEAD~3', '交互式整理最近三个提交，操作前核对是否已共享。网页仅支持普通 rebase。', 'git-rebase'],
+    ['git clean -nd', '预览将被清理的未跟踪文件和目录；此条只预览。', 'git-clean'],
+    ['git check-ignore -v <file-path>', '检查 .gitignore 等规则为何忽略某个文件；已跟踪文件不会仅因加入忽略规则而取消跟踪。', 'git-check-ignore']
+  ];
+  for (const [command, description, page] of externalCommands) {
+    const row = node('div', 'help-row help-reference-row'), code = node('code', 'command-chip', command);
+    const detail = node('span', '', '仅供参考 · ' + description), link = node('a', '', '官方说明');
+    link.href = 'https://git-scm.com/docs/' + page; link.target = '_blank'; link.rel = 'noopener noreferrer'; detail.append(document.createTextNode(' '), link);
+    row.append(code, detail); reference.append(row);
+  }
+  const extraGrid = node('div', 'help-bento-grid help-expanded-grid'); extraGrid.append(dailyGroup, comparison, reference);
+  const extraPanel = typeof helpPanels !== 'undefined' ? helpPanels.get('advanced') : $('help-content');
+  extraPanel.append(extraGrid);
   // 工作区保留可编辑文本，同时提供按行着色的差异视图。
   const workDetails = node('details', 'work-diff'); workDetails.append(node('summary', '', '查看工作区相对暂存区的差异'));
   const workDiff = node('pre', 'code-view'); workDiff.id = 'work-diff'; workDetails.append(workDiff);

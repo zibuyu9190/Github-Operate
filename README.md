@@ -41,7 +41,7 @@
 
 ### 支持的命令
 
-命令可带 `git` 前缀；含空格的文件名和说明需要加引号。页面的“命令手册”包含可点击示例。
+命令可带 `git` 前缀；含空格的文件名和说明需要加引号。页面的“命令手册”包含可点击示例，以及标记为“仅供参考”的真实终端命令；参考项不会填入或执行，不代表模拟器支持其参数。
 
 命令手册顶部可模糊搜索全部分类中的命令、参数、中文说明和组合流程，例如 `rebase`、`--hard`、`取消暂存`。支持命令片段、按顺序省略字符，以及英文长词的一个错字或相邻字母颠倒（如 `rbase`、`swtch`、`rebsae`）；多个关键词用空格分隔，同时匹配，不区分英文大小写。搜索结果仍可点击填入命令。点击“清空”或在搜索框按 Esc 恢复原来的浏览分类；搜索框为空时 Esc 关闭手册。
 
@@ -49,24 +49,38 @@
 
 | 类别 | 支持写法 |
 | --- | --- |
-| 查看 | `status`；`log [--oneline] [--graph] [--all]`；`diff [--cached]`；`show [提交引用]` |
-| 暂存、提交 | `add <文件…>`、`add .`；`commit -m "说明"` |
+| 查看 | `status`；`log [--oneline] [--graph] [--all]`；`diff [--cached]`；`show [提交引用]`；`reflog [--oneline]` |
+| 暂存、提交 | `add <文件…>`、`add .`；`commit [-a] -m "说明"`、`commit -am "说明"`；`commit --amend -m "说明"`、`commit --amend --no-edit`（可加 `-a`） |
 | 取消暂存、恢复 | `restore --staged <文件…>`、`restore --staged .`；`restore <文件…>`、`restore .`（从暂存区恢复工作区，会丢弃未暂存修改） |
-| 临时保存 | `stash`、`stash push [-u] [-m "说明"]`；`stash list`；`stash pop`（最近一份） |
-| 分支 | `branch [-a] [-vv]`、`branch <名称>`、`branch -d <名称>`；`switch <分支>`、`switch -c <名称>`；`checkout <分支或提交>`、`checkout -b <名称>` |
+| 临时保存 | `stash`、`stash push [-u] [-m "说明"]`；`stash list`；`stash pop/apply/drop [stash@{n}]`（省略时最近一份）；`stash clear` |
+| 文件 | `rm [--cached] <文件…>`；`mv <原文件> <新文件>`（仅明确文件路径） |
+| 分支 | `branch [-a] [-vv]`、`branch <名称> [引用]`、`branch -m [旧名] <新名>`、`branch -d <名称>`；`switch <分支>`、`switch -c <名称>`；`checkout <分支或提交>`、`checkout -b <名称>`；两者均支持 `-` 和 `--detach [引用]` |
+| checkout 恢复文件 | `checkout -- <文件…>`（暂存区到工作区）；`checkout <引用> -- <文件…>`（该提交到暂存区及工作区）；均支持 `.` |
 | 合并、变基 | `merge [--no-ff] <引用>`；`rebase <引用>`；两者均支持 `--continue`、`--abort` |
+| 摘取提交 | `cherry-pick <普通提交…>`（明确列出的顺序）；`cherry-pick --continue`、`--skip`、`--abort` |
+| 本地标签 | `tag`、`tag -l`；`tag <名称> [引用]`；`tag -a <名称> [引用] -m "说明"`；`tag -d <名称>` |
 | 撤回 | `reset [--soft或--mixed或--hard] [提交]`（默认 mixed、HEAD）；`revert <普通提交>`、`revert --continue`、`revert --abort` |
 | 虚拟远程 | `remote [-v]`（仅展示虚拟 origin，无真实地址）；`fetch [origin]`；`pull [--rebase或--no-rebase] [origin [分支]]`；`push [origin [分支]]`、`push -u origin <分支>` |
 
-引用支持本地分支、`origin/<分支>`、C 编号、唯一的 4–7 位模拟短 ID、`HEAD`、`HEAD~n`、`HEAD^` 和指定父提交的 `HEAD^2`。C 编号及短 ID 都不是实际 Git 对象哈希。图中保留失去引用的对象供教学比较，`log --all` 只列出本地引用可达的历史；文本 `--graph` 以父提交列表表达拓扑，完整连线以画布为准。
+引用支持本地分支、本地标签、`origin/<分支>`、C 编号、唯一的 4–7 位模拟短 ID、`HEAD`、`HEAD~n`、`HEAD^`、指定父提交的 `HEAD^2` 和本次会话的 `HEAD@{n}`。C 编号及短 ID 都不是实际 Git 对象哈希。图中保留失去引用的对象供教学比较，`log --all` 只列出本地引用（含标签）可达的历史；文本 `--graph` 以父提交列表表达拓扑，完整连线以画布为准。
+
+`checkout main` 与 `switch main` 都切换分支，`checkout -b feature` 与 `switch -c feature` 都创建并切换。checkout 还兼有恢复文件的用途，`checkout -- hello.txt` 对应 `restore hello.txt`；不能将所有 checkout 都直接换成 switch。switch 支持显式 `--detach` 查看提交。`checkout HEAD -- hello.txt` 同时覆盖该文件的暂存区和工作区，与默认 restore 的来源、目标不同。
+
+手册还列出 init、clone、作者配置、远程地址配置、fetch --prune、删除远程分支、推送标签、文件历史、提交间 diff、cherry、blame、交互式 rebase、clean 预览和忽略规则检查。这些为真实终端参考，附官方链接；模拟器不执行。
 
 ### 教学边界与验证
 
-只支持普通文本，每个文件最多 300 行、20000 个字符。merge、rebase、revert、pull 开始前要求工作区和暂存区干净，这是本教学版的支持边界。暂不支持二进制、重命名检测、文件/目录合并冲突、多个最佳合并基点、交互式 rebase、重放合并提交、撤回合并提交、强制推送及未列出的其他参数；未知写法会明确提示，不会伪造成功。仅在当前页面内保留状态，无账号或持久化。
+只支持普通文本，每个文件最多 300 行、20000 个字符。merge、rebase、revert、cherry-pick、pull 开始前要求工作区和暂存区干净，这是本教学版的支持边界。暂不支持二进制、重命名检测、文件/目录合并冲突、多个最佳合并基点、交互式 rebase、重放或摘取合并提交、撤回合并提交、强制推送及未列出的其他参数；未知写法会明确提示，不会伪造成功。仅在当前页面内保留状态，无账号或持久化。
 
 restore 支持明确文件名与 `.`，不支持目录路径匹配、`--source` 或在未解决冲突时恢复文件。`restore --staged` 保留工作区；普通 restore 从暂存区恢复，不从 HEAD 恢复。`show` 对普通提交显示与父提交的差异，根提交与空快照比较；合并提交按教学方式分别与每个父提交比较。
 
-stash 默认保存已跟踪改动，`-u` 包含未跟踪文件。教学版使用独立快照栈保存，不在提交图中模拟 stash 的内部提交结构，也不支持 `--index`、`apply`、`drop` 或指定历史 stash。pop 前要求已跟踪文件与暂存区干净，遇到文件覆盖或目录冲突会整体拒绝。pop 成功后移除最近记录，普通修改需重新 add，已跟踪的新增文件恢复到暂存区；冲突时保留记录，编辑后 add 标记全部解决，即可正常提交，无需 `--continue`。可用 `reset --hard` 丢弃恢复产生的已跟踪改动，stash 记录仍保留。stash 随刷新或场景重置清空。
+stash 默认保存已跟踪改动，`-u` 包含未跟踪文件。教学版使用独立快照栈保存，不在提交图中模拟 stash 的内部提交结构，不支持 `--index`。pop/apply 可指定 `stash@{n}`，恢复前要求已跟踪文件与暂存区干净，遇到文件覆盖或目录冲突会整体拒绝。pop 成功后移除指定记录，apply 保留记录；普通修改需重新 add，已跟踪的新增文件恢复到暂存区；冲突时均保留记录，编辑后 add 标记全部解决，即可正常提交，无需 `--continue`。drop 删除指定记录，clear 清空全部记录，均不改变文件。可用 `reset --hard` 丢弃恢复产生的已跟踪改动，stash 记录仍保留。stash 随刷新或场景重置清空。
+
+cherry-pick 应用指定提交相对父提交的改动，生成新的普通提交，来源分支不移动。支持明确列出的多个提交，不支持修订范围、`-m` 主线选择、`--no-commit`。冲突后编辑、add，再 `--continue`；`--skip` 丢弃当前解决结果并继续下一项，`--abort` 恢复整批开始前的位置和文件。重复补丁或解决后没有改动时暂停，需要 skip 或 abort，不创建空提交。可在“分支与合并”场景单独练习摘取，但它不等同于该关 merge/rebase 路线的验收。
+
+`commit -a/-am` 只自动暂存已跟踪文件，未跟踪文件仍须 add。amend 用暂存区内容及原父提交生成新提交，原 ID 仍保留供观察。标签固定指向提交，在图中显示 `tag:`；注解仅存为教学元数据，不模拟独立 tag 对象、签名或标签同步。分支和标签重名时教学版优先解析分支，建议使用不同名称。
+
+reflog 是本次页面会话中每条命令最终 HEAD 位置的教学记录，批量 cherry-pick 和 rebase 的内部移动不逐步记录，也不模拟真实 Git 的磁盘日志、过期和回收。可先 reflog，再 `branch rescue HEAD@{n}` 保存旧位置；编号随新记录变化，刷新或切换场景清空。
 
 在项目根目录使用 Node.js 22 或更新版本运行独立网页测试：
 
@@ -76,7 +90,7 @@ node --test webui/tests/*.test.cjs
 
 真实 Git 对照测试还需要本机 `git` 命令；仅在 `target/webui-validation/` 中创建并清理独立临时仓库与本地裸仓库，比较文件、暂存区、引用和父子拓扑，不连接网络，也不修改开发仓库。网页本身不需要 Node.js 或 Git。
 
-命令语义参考 Git 官方的 [merge](https://git-scm.com/docs/git-merge)、[rebase](https://git-scm.com/docs/git-rebase)、[reset](https://git-scm.com/docs/git-reset)、[revert](https://git-scm.com/docs/git-revert)、[push](https://git-scm.com/docs/git-push)、[restore](https://git-scm.com/docs/git-restore)、[stash](https://git-scm.com/docs/git-stash)、[show](https://git-scm.com/docs/git-show)、[branch](https://git-scm.com/docs/git-branch) 和 [remote](https://git-scm.com/docs/git-remote) 说明。
+命令语义参考 Git 官方的 [merge](https://git-scm.com/docs/git-merge)、[rebase](https://git-scm.com/docs/git-rebase)、[reset](https://git-scm.com/docs/git-reset)、[revert](https://git-scm.com/docs/git-revert)、[push](https://git-scm.com/docs/git-push)、[restore](https://git-scm.com/docs/git-restore)、[stash](https://git-scm.com/docs/git-stash)、[show](https://git-scm.com/docs/git-show)、[branch](https://git-scm.com/docs/git-branch)、[remote](https://git-scm.com/docs/git-remote)、[cherry-pick](https://git-scm.com/docs/git-cherry-pick)、[checkout](https://git-scm.com/docs/git-checkout)、[switch](https://git-scm.com/docs/git-switch)、[commit](https://git-scm.com/docs/git-commit)、[rm](https://git-scm.com/docs/git-rm)、[mv](https://git-scm.com/docs/git-mv)、[tag](https://git-scm.com/docs/git-tag) 和 [reflog](https://git-scm.com/docs/git-reflog) 说明。
 
 ## 环境
 

@@ -62,3 +62,11 @@
   .help-search input { font-size: 16px; }
   .help-search-active .help-bento-grid { grid-template-columns: 1fr; }
 }
+
+/* 扩展命令与真实终端参考采用纵向卡片，长命令不撑破分类列；参考项不伪装成执行按钮。 */
+.help-expanded-grid { margin-top: 12px; }
+.help-expanded-grid .help-row { flex-direction: column; align-items: flex-start; gap: 5px; }
+.help-expanded-grid .command-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.help-expanded-grid .help-row > span { text-align: left; overflow-wrap: anywhere; }
+.help-reference-row code { cursor: text; }
+.help-reference-row a { color: #0f766e; }

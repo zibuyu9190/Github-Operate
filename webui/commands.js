@@ -38,6 +38,7 @@
     if (!name) throw new Error('请输入 Git 命令，例如 git status。');
     switch (name) {
       case 'status': if (a.length) invalid(); return { name };
+      case 'reflog': if (a.length && !(a.length === 1 && a[0] === '--oneline')) invalid(); return { name };
       case 'log':
         if (a.some(x => !['--oneline', '--graph', '--all'].includes(x)) || new Set(a).size !== a.length) invalid();
         return { name, all: a.includes('--all'), graph: a.includes('--graph'), oneline: a.includes('--oneline') };
@@ -57,9 +58,9 @@
       }
       case 'stash': {
         const action = a[0] || 'push';
-        if (['list', 'pop'].includes(action)) {
-          if (a.length !== 1) invalid();
-          return { name, action };
+        if (['list', 'clear', 'pop', 'apply', 'drop'].includes(action)) {
+          if (['list', 'clear'].includes(action) ? a.length !== 1 : a.length > 2 || (a[1] && !/^stash@\{\d+\}$/.test(a[1]))) invalid();
+          return { name, action, index: a[1] ? Number(a[1].slice(7, -1)) : 0 };
         }
         if (action !== 'push') invalid();
         let includeUntracked = false, message = null;
@@ -71,18 +72,56 @@
         return { name, action, includeUntracked, message };
       }
       case 'add': if (!a.length || a.some(x => !plain(x))) invalid(); return { name, paths: a };
-      case 'commit':
-        if (a.length !== 2 || a[0] !== '-m' || !a[1].trim()) invalid();
-        return { name, message: a[1] };
+      case 'rm': {
+        const cached = a[0] === '--cached', paths = cached ? a.slice(1) : a;
+        if (!paths.length || paths.some(x => !plain(x))) invalid();
+        return { name, cached, paths };
+      }
+      case 'mv': if (a.length !== 2 || a.some(x => !plain(x))) invalid(); return { name, source: a[0], destination: a[1] };
+      case 'commit': {
+        let message = null, amend = false, all = false, noEdit = false;
+        for (let i = 0; i < a.length; i++) {
+          if (a[i] === '--amend' && !amend) amend = true;
+          else if (a[i] === '--no-edit' && !noEdit) noEdit = true;
+          else if (a[i] === '-a' && !all) all = true;
+          else if (['-m', '-am'].includes(a[i]) && message === null && a[i + 1]?.trim()) { if (a[i] === '-am') { if (all) invalid(); all = true; } message = a[++i]; }
+          else invalid();
+        }
+        if ((message === null && !(amend && noEdit)) || (noEdit && (!amend || message !== null))) invalid();
+        return { name, message, amend, all };
+      }
+      case 'tag': {
+        if (!a.length || (a.length === 1 && a[0] === '-l')) return { name, action: 'list' };
+        if (a[0] === '-d' && a.length === 2 && plain(a[1])) return { name, action: 'delete', tag: a[1] };
+        if (a[0] === '-a') {
+          if (!plain(a[1])) invalid();
+          const rest = a.slice(2), m = rest.indexOf('-m');
+          if (m < 0 || !rest[m + 1]?.trim() || rest.length !== (m === 0 ? 2 : 3) || m > 1 || (m === 1 && !plain(rest[0]))) invalid();
+          return { name, action: 'create', tag: a[1], ref: m === 1 ? rest[0] : 'HEAD', message: rest[m + 1] };
+        }
+        if (a.length <= 2 && a.every(plain)) return { name, action: 'create', tag: a[0], ref: a[1] || 'HEAD' };
+        return invalid();
+      }
       case 'branch':
         if (!a.length) return { name, action: 'list' };
         if (a.every(x => ['-a', '-vv'].includes(x)) && new Set(a).size === a.length) return { name, action: 'list', all: a.includes('-a'), verbose: a.includes('-vv') };
-        if (a.length === 1 && plain(a[0])) return { name, action: 'create', branch: a[0] };
+        if (a.length <= 2 && a.every(plain)) return { name, action: 'create', branch: a[0], ref: a[1] || 'HEAD' };
+        if (a[0] === '-m' && [2, 3].includes(a.length) && a.slice(1).every(plain)) return { name, action: 'rename', branch: a.length === 3 ? a[1] : null, target: a.at(-1) };
         if (a.length === 2 && a[0] === '-d' && plain(a[1])) return { name, action: 'delete', branch: a[1] };
         return invalid();
       case 'switch': case 'checkout':
-        if (a.length === 1 && plain(a[0])) return { name, ref: a[0], create: false };
+        if (name === 'checkout' && a.includes('--')) {
+          const separator = a.indexOf('--');
+          if (separator > 1 || (separator === 1 && !plain(a[0])) || !a.slice(separator + 1).length || !a.slice(separator + 1).every(plain)) invalid();
+          return { name, ref: separator ? a[0] : null, paths: a.slice(separator + 1) };
+        }
+        if (a[0] === '--detach' && (a.length === 1 || a.length === 2 && plain(a[1]))) return { name, ref: a[1] || 'HEAD', detach: true };
+        if (a.length === 1 && (plain(a[0]) || a[0] === '-')) return { name, ref: a[0], create: false };
         if (a.length === 2 && a[0] === (name === 'switch' ? '-c' : '-b') && plain(a[1])) return { name, ref: a[1], create: true };
+        return invalid();
+      case 'cherry-pick':
+        if (a.length === 1 && ['--continue', '--abort', '--skip'].includes(a[0])) return { name, action: a[0].slice(2) };
+        if (a.length && a.every(plain)) return { name, action: 'start', refs: a };
         return invalid();
       case 'merge': case 'rebase': case 'revert':
         if (a.length === 1 && ['--continue', '--abort'].includes(a[0])) return { name, action: a[0].slice(2) };

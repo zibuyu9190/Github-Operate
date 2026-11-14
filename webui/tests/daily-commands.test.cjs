@@ -15,7 +15,7 @@ const context = sim => ({ state: sim.state, files: sim.fileStatus(), scene: sim.
 
 test('新增命令拒绝未支持选项与不完整参数，语法错误保持全部状态', () => {
   const sim = new Simulator();
-  for (const command of ['git restore', 'git restore --staged', 'git restore --worktree hello.txt', 'git stash push -m', 'git stash push -m ""', 'git stash push -u -u', 'git stash pop --index', 'git stash pop stash@{1}', 'git stash --continue', 'git show --stat', 'git remote add origin url', 'git branch -a -a']) {
+  for (const command of ['git restore', 'git restore --staged', 'git restore --worktree hello.txt', 'git stash push -m', 'git stash push -m ""', 'git stash push -u -u', 'git stash pop --index', 'git stash pop stash@{-1}', 'git stash --continue', 'git show --stat', 'git remote add origin url', 'git branch -a -a']) {
     const before = sim.snapshot(); assert.throws(() => parse(command), command);
     assert.equal(sim.execute(command).ok, false); assert.deepEqual(sim.snapshot(), before);
   }

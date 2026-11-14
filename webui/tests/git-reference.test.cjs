@@ -35,7 +35,7 @@ function fixture(t) {
   const command = (...args) => {
     const encoded = ['git', ...args.map(x => /\s/.test(x) ? '"' + x.replaceAll('"', '\\"') + '"' : x)].join(' ');
     const result = sim.execute(encoded), actual = git(args, true);
-    assert.equal(result.ok && !result.conflict, actual.status === 0, encoded + '\n模拟：' + result.output + '\n实际：' + actual.stderr + actual.stdout);
+    assert.equal(result.ok && !result.conflict && !result.paused, actual.status === 0, encoded + '\n模拟：' + result.output + '\n实际：' + actual.stderr + actual.stdout);
     return result;
   };
   const remove = file => { sim.deleteFile(file); fs.unlinkSync(path.join(directory, file)); };
@@ -207,4 +207,69 @@ test('真实 Git 对照：离线裸仓库 fetch、pull 两种整合及 push 拒�
     assert.deepEqual(f.sim.state.remote.commits[f.sim.state.remote.branches.main].tree, f.sim.headTree());
     const remoteTree = f.git(['rev-parse', 'main^{tree}'], false, remotePath).stdout.trim(); assert.equal(remoteTree, f.git(['rev-parse', 'HEAD^{tree}']).stdout.trim());
   }
+});
+
+test('真实 Git 对照：cherry-pick 只摘取指定补丁，多提交顺序一致', t => {
+  const f = fixture(t); f.command('switch', '-c', 'source');
+  f.edit('excluded.txt', '不摘取\n'); f.commit('来源一'); f.edit('selected.txt', '摘取\n'); f.commit('来源二');
+  f.command('branch', 'pick-one'); f.edit('third.txt', '第三次\n'); f.commit('来源三'); f.command('switch', 'main');
+  f.command('cherry-pick', 'pick-one', 'source'); f.assertState();
+  assert.equal(f.sim.state.work['excluded.txt'], undefined);
+});
+
+test('真实 Git 对照：整批 cherry-pick 冲突、继续、跳过及中止', t => {
+  for (const mode of ['continue', 'skip', 'abort']) {
+    const f = fixture(t); f.command('switch', '-c', 'source');
+    f.edit('first.txt', '第一份\n'); f.commit('第一份'); f.command('branch', 'pick-one');
+    f.edit('hello.txt', '来源修改\n'); f.commit('冲突修改'); f.command('branch', 'pick-two');
+    f.edit('last.txt', '最后一份\n'); f.commit('最后一份'); f.command('switch', 'main');
+    f.edit('hello.txt', '主分支修改\n'); f.commit('主分支修改');
+    assert.equal(f.command('cherry-pick', 'pick-one', 'pick-two', 'source').conflict, true);
+    if (mode === 'continue') { f.edit('hello.txt', '解决结果\n'); f.command('add', '.'); }
+    f.command('cherry-pick', '--' + mode); f.assertState();
+  }
+});
+
+test('真实 Git 对照：cherry-pick 重复补丁暂停后 skip 或 abort', t => {
+  for (const mode of ['skip', 'abort']) {
+    const f = fixture(t); f.edit('hello.txt', '已经存在的修改\n'); f.commit('已存在');
+    assert.equal(f.command('cherry-pick', 'HEAD').paused, true); f.command('cherry-pick', '--' + mode); f.assertState();
+  }
+});
+
+test('真实 Git 对照：自动暂存、修订普通及合并提交，保留未暂存内容', t => {
+  const f = fixture(t); f.edit('hello.txt', '自动暂存\n'); f.edit('new.txt', '未跟踪\n');
+  f.command('commit', '-am', '自动提交'); f.assertState(); f.command('add', 'new.txt');
+  f.edit('hello.txt', '尚未暂存\n'); f.command('commit', '--amend', '--no-edit'); f.assertState();
+  f.command('restore', 'hello.txt'); f.command('commit', '--amend', '-m', '修订说明'); f.assertState();
+  f.command('switch', '-c', 'feature'); f.edit('feature.txt', 'feature\n'); f.commit('分支修改');
+  f.command('switch', 'main'); f.command('merge', '--no-ff', 'feature');
+  f.command('commit', '--amend', '-m', '修订合并说明'); f.assertState();
+  f.command('rm', '--cached', 'README.md'); f.command('commit', '-am', '取消跟踪'); f.assertState();
+});
+
+test('真实 Git 对照：rm、cached、mv 保留暂存与工作区的独立内容', t => {
+  const f = fixture(t); f.edit('hello.txt', '暂存\n'); f.command('add', 'hello.txt'); f.edit('hello.txt', '工作\n');
+  f.command('rm', 'hello.txt'); f.command('rm', '--cached', 'hello.txt'); f.assertState();
+  f.command('mv', 'hello.txt', 'greeting.txt'); f.assertState(); f.command('add', 'greeting.txt');
+  f.command('rm', '--cached', 'greeting.txt'); f.assertState(); f.command('commit', '-am', '取消跟踪'); f.assertState();
+  f.command('rm', 'README.md'); f.assertState();
+});
+
+test('真实 Git 对照：branch 改名、switch 往返、detach 和 checkout 恢复文件', t => {
+  const f = fixture(t); f.command('branch', '-m', 'trunk'); f.command('switch', '-c', 'feature'); f.command('switch', '-'); f.assertState();
+  f.command('checkout', '-'); f.command('switch', '--detach', 'HEAD'); f.assertState(); f.command('switch', '-'); f.assertState();
+  f.edit('hello.txt', '暂存\n'); f.command('add', 'hello.txt'); f.edit('hello.txt', '工作\n');
+  f.command('checkout', '--', 'hello.txt'); f.assertState(); f.command('checkout', 'HEAD', '--', 'hello.txt'); f.assertState();
+  f.command('branch', 'rescue', 'HEAD@{1}'); f.assertState();
+});
+
+test('真实 Git 对照：本地标签位置、选定 stash 的 apply、pop、drop 和 clear', t => {
+  const f = fixture(t); f.command('tag', 'v1'); f.edit('hello.txt', '版本二\n'); f.commit('版本二'); f.command('tag', '-a', 'v2', '-m', '说明');
+  f.command('checkout', 'v1'); f.assertState(); f.command('switch', 'main'); f.command('tag', '-d', 'v1');
+  f.edit('hello.txt', 'one\n'); f.command('stash', 'push', '-m', 'one'); f.edit('hello.txt', 'two\n'); f.command('stash', 'push', '-m', 'two');
+  f.command('stash', 'apply', 'stash@{1}'); f.assertState(); f.command('restore', '.');
+  f.command('stash', 'pop', 'stash@{1}'); f.assertState(); f.command('stash', 'drop'); f.assertState();
+  assert.equal(f.sim.state.stashes.length, 0); assert.equal(f.git(['stash', 'list']).stdout, '');
+  f.command('stash', 'push'); f.command('stash', 'clear'); f.assertState(); assert.equal(f.git(['stash', 'list']).stdout, '');
 });

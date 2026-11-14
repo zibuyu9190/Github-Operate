@@ -54,6 +54,16 @@ function run(sim, text) {
   const result = sim.execute(text); assert.equal(result.ok, true, text + ': ' + result.output); return result;
 }
 
+test('标签拥有独立引用标记并保护离开分支的提交，删除后恢复游离样式', () => {
+  const sim = new Simulator(), view = renderer(false);
+  sim.editFile('hello.txt', '标签版本\n'); run(sim, 'git add .'); run(sim, 'git commit -m "标签版本"');
+  const id = sim.headId(); run(sim, 'git tag v1'); run(sim, 'git reset --hard HEAD~1'); view.graph.draw(sim.state);
+  assert.ok(view.all().some(e => e.textContent === 'tag: v1'));
+  assert.ok(!String(view.all().find(e => e.attrs['aria-label']?.startsWith(id + ' ')).attrs.class).includes('orphan'));
+  run(sim, 'git tag -d v1'); view.graph.draw(sim.state);
+  assert.match(view.all().find(e => e.attrs['aria-label']?.startsWith(id + ' ')).attrs.class, /orphan/);
+});
+
 function commitFile(sim, path, text) {
   sim.editFile(path, text); run(sim, 'git add ' + path); run(sim, 'git commit -m "布局练习"'); return sim.headId();
 }

@@ -122,13 +122,19 @@
       try {
         const command = Commands.parse(input);
         const pending = this.state.pending;
-        const readOnly = ['status', 'log', 'diff', 'show', 'remote'].includes(command.name) || (command.name === 'branch' && command.action === 'list') || (command.name === 'stash' && command.action === 'list');
+        const readOnly = ['status', 'log', 'diff', 'show', 'remote', 'reflog'].includes(command.name) || (['branch', 'tag'].includes(command.name) && command.action === 'list') || (command.name === 'stash' && command.action === 'list');
         const discardStashConflict = pending?.type === 'stash' && command.name === 'reset' && command.mode === 'hard';
         if (pending?.type === 'stash' && !readOnly && command.name !== 'add' && !discardStashConflict) throw new Error('stash 恢复冲突尚未解决：编辑后 git add；也可 reset --hard 丢弃恢复结果。stash 记录仍保留，没有 --continue 或 --abort。');
-        if (pending && pending.type !== 'stash' && !readOnly && command.name !== 'add' && !(command.name === pending.type && ['continue', 'abort'].includes(command.action)) && !(command.name === 'commit' && pending.type === 'merge')) {
+        if (pending && pending.type !== 'stash' && !readOnly && command.name !== 'add' && !(command.name === pending.type && ['continue', 'abort', 'skip'].includes(command.action)) && !(command.name === 'commit' && pending.type === 'merge' && !command.amend)) {
           throw new Error('当前处于 ' + this.state.pending.type + ' 处理中，请先解决并继续，或使用对应的 --abort。');
         }
         const result = this.dispatch(command);
+        // reflog 只记录 HEAD 更新，查看、文件编辑、失败命令及远程变化不伪装成移动记录。
+        const previousId = before.head.branch ? before.branches[before.head.branch] : before.head.id;
+        const nextId = this.headId();
+        if (previousId !== nextId || before.head.branch !== this.state.head.branch || ['reset', 'switch', 'checkout'].includes(command.name) && !command.paths || command.name === 'commit') {
+          this.state.reflog.unshift({ id: nextId, message: input.trim() });
+        }
         return { ok: true, command, before, after: this.snapshot(), ...result };
       } catch (error) {
         this.state = before;
@@ -143,12 +149,21 @@
         case 'diff': return this.diff(c.cached);
         case 'show': return this.show(c.ref);
         case 'remote': return { output: c.verbose ? 'origin\t模拟远程（无真实地址） (fetch)\norigin\t模拟远程（无真实地址） (push)' : 'origin', explanation: '此网页只有虚拟 origin；真实终端的 remote -v 会显示仓库地址，这里不会连接网络。' };
+        case 'reflog': return { output: this.state.reflog.map((item, n) => item.id + ' HEAD@{' + n + '}: ' + item.message).join('\n'), explanation: '这是本次页面会话的教学记录，每条改变 HEAD 的命令记录最终位置；批量摘取、变基的内部移动不逐步记录。可用 HEAD@{n} 找回位置；刷新或切换场景会清空。' };
+        case 'tag': return this.tag(c);
+        case 'rm': return this.remove(c);
+        case 'mv': return this.renameFile(c);
         case 'restore': return this.restore(c);
         case 'stash': return this.stash(c);
         case 'add': return this.add(c.paths);
-        case 'commit': return this.commit(c.message);
+        case 'commit': return this.commit(c.message, c);
         case 'branch': return this.branch(c);
         case 'switch': case 'checkout': return this.checkout(c);
+        case 'cherry-pick':
+          if (c.action === 'abort') return this.abort(c.name);
+          if (c.action === 'continue') return this.continueOperation(c.name);
+          if (c.action === 'skip') return this.skipCherryPick();
+          return this.cherryPick(c);
         case 'merge': case 'rebase': case 'revert':
           if (c.action === 'abort') return this.abort(c.name);
           if (c.action === 'continue') return this.continueOperation(c.name);
@@ -163,6 +178,12 @@
 
     /** 引用查找只访问本地对象；fetch 前不能通过远程真实提交 ID 越过同步过程。 */
     resolve(ref) {
+      const log = /^HEAD@\{(\d+)\}$/.exec(ref);
+      if (log) {
+        const entry = this.state.reflog[Number(log[1])];
+        if (!entry) throw new Error('没有这个 HEAD 更新记录：' + ref);
+        return entry.id;
+      }
       const match = /^(.*?)([~^])(\d*)$/.exec(ref);
       if (match) {
         let id = this.resolve(match[1]);
@@ -182,6 +203,7 @@
       }
       if (ref === 'HEAD') return this.headId();
       if (own(this.state.branches, ref)) return this.state.branches[ref];
+      if (own(this.state.tags, ref)) return this.state.tags[ref].id;
       if (ref.startsWith('origin/') && own(this.state.tracking, ref.slice(7))) return this.state.tracking[ref.slice(7)];
       if (own(this.state.commits, ref)) return ref;
       const matches = Object.values(this.state.commits).filter(c => /^[a-f\d]{4,7}$/i.test(ref) && c.hash.startsWith(ref.toLowerCase()));
@@ -273,7 +295,7 @@
     }
 
     log(c) {
-      const reachable = c.all ? new Set([...Object.values(this.state.branches), ...Object.values(this.state.tracking), this.headId()].flatMap(id => [...this.ancestors(id)])) : this.ancestors(this.headId());
+      const reachable = c.all ? new Set([...Object.values(this.state.branches), ...Object.values(this.state.tracking), ...Object.values(this.state.tags).map(tag => tag.id), this.headId()].flatMap(id => [...this.ancestors(id)])) : this.ancestors(this.headId());
       const commits = Object.values(this.state.commits).filter(x => reachable.has(x.id));
       // 按 DAG 拓扑输出，保证父提交在所有子提交之后出现，而非假设创建时间等于拓扑。
       const pending = new Set(commits.map(x => x.id)), ordered = [];
@@ -330,7 +352,8 @@
     /** 暂存架独立保存快照，不伪装成用户提交；pop 默认恢复改动，不恢复原暂存划分。 */
     stash(c) {
       const stack = this.state.stashes;
-      if (c.action === 'list') return { output: stack.map((item, n) => 'stash@{' + n + '}: On ' + item.branch + ': ' + item.message).join('\n') || '没有暂存记录。', explanation: 'stash@{0} 是最近保存的一份；教学版 pop 只取最近一份。' };
+      if (c.action === 'list') return { output: stack.map((item, n) => 'stash@{' + n + '}: On ' + item.branch + ': ' + item.message).join('\n') || '没有暂存记录。', explanation: 'stash@{0} 是最近保存的一份；pop、apply 和 drop 可以指定记录编号。' };
+      if (c.action === 'clear') { this.state.stashes = []; return { output: '已清空虚拟 stash 记录。', explanation: 'clear 移除全部临时记录，工作区和提交不变。' }; }
       if (c.action === 'push') {
         const head = this.headTree(), tracked = keys(head, this.state.index), work = {}, untracked = {};
         for (const path of tracked) put(work, path, value(this.state.work, path));
@@ -343,27 +366,64 @@
         return { output: '已保存到 stash@{0}：' + stack[0].message, explanation: '已跟踪的工作区和暂存区回到 HEAD；' + (c.includeUntracked ? '未跟踪文件也一起保存并移出工作区。' : '未跟踪文件留在工作区。') + ' HEAD 和分支位置不变，可切换分支后再 stash pop。' };
       }
       if (!stack.length) throw new Error('没有可恢复的 stash 记录。');
-      const item = stack[0], head = this.headTree();
-      if (!same(head, this.state.index) || keys(head).some(p => value(head, p) !== value(this.state.work, p))) throw new Error('教学版 stash pop 前要求已跟踪文件与暂存区干净，请先提交或再次 stash。未跟踪文件可保留，但不能与恢复路径重叠。');
+      const position = c.index || 0, item = stack[position], head = this.headTree(), label = 'stash@{' + position + '}';
+      if (!item) throw new Error('没有该 stash 记录：' + label);
+      if (c.action === 'drop') { stack.splice(position, 1); return { output: '已移除 ' + label, explanation: '只删除这份临时记录，工作区和提交不变。' }; }
+      if (!same(head, this.state.index) || keys(head).some(p => value(head, p) !== value(this.state.work, p))) throw new Error('教学版 stash ' + c.action + ' 前要求已跟踪文件与暂存区干净，请先提交或再次 stash。未跟踪文件可保留，但不能与恢复路径重叠。');
       const loose = {};
       for (const path of Object.keys(this.state.work)) if (!own(this.state.index, path)) loose[path] = this.state.work[path];
       const restored = keys(item.work, item.untracked), present = keys(this.state.work, this.state.index);
       const overlaps = (a, b) => a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
-      if (keys(loose).some(p => restored.some(q => overlaps(p, q))) || keys(item.untracked).some(p => present.some(q => overlaps(p, q)))) throw new Error('stash pop 将覆盖现有文件或目录，已拒绝；stash 记录仍保留。');
-      const merged = this.mergeTrees(item.base, head, item.work, 'stash@{0}');
+      if (keys(loose).some(p => restored.some(q => overlaps(p, q))) || keys(item.untracked).some(p => present.some(q => overlaps(p, q)))) throw new Error('stash ' + c.action + ' 将覆盖现有文件或目录，已拒绝；stash 记录仍保留。');
+      const merged = this.mergeTrees(item.base, head, item.work, label);
       checkTreePaths({ ...loose, ...merged.tree, ...item.untracked });
       const op = { type: 'stash', conflicts: merged.conflicts, unresolved: [] };
       if (Object.keys(merged.conflicts).length) {
         this.applyMerge(merged, op); this.state.pending = op;
         this.state.work = { ...loose, ...this.state.work, ...clone(item.untracked) };
-        return { conflict: true, output: 'CONFLICT：' + op.unresolved.join('、') + '\nstash@{0} 已保留。', explanation: 'stash pop 恢复时发生冲突。编辑文件并 add，全部标记解决后即可正常提交；没有 stash --continue 或 --abort。记录继续保留。' };
+        return { conflict: true, output: 'CONFLICT：' + op.unresolved.join('、') + '\n' + label + ' 已保留。', explanation: 'stash 恢复时发生冲突。编辑文件并 add，全部标记解决后即可正常提交；没有 stash --continue 或 --abort。记录继续保留。' };
       }
       this.state.work = { ...loose, ...merged.tree, ...clone(item.untracked) };
       this.state.index = clone(head);
       // 与默认 Git stash pop 一致：普通修改不自动暂存，恢复的新增文件进入暂存区。
       for (const path of keys(merged.tree)) if (!own(head, path)) this.state.index[path] = merged.tree[path];
-      stack.shift();
-      return { output: '已恢复并移除 stash@{0}。', explanation: '改动已恢复到当前分支，普通修改需要重新 add；新增的已跟踪文件恢复到暂存区。HEAD 不变，未跟踪文件仍未跟踪。' };
+      if (c.action === 'pop') stack.splice(position, 1);
+      return { output: '已恢复' + (c.action === 'pop' ? '并移除 ' : '并保留 ') + label, explanation: '普通修改需要重新 add；新增的已跟踪文件恢复到暂存区。apply 保留记录，pop 成功后移除；冲突时均保留记录。' };
+    }
+
+    /** 默认 rm 同时删除工作区与暂存项；--cached 仅取消跟踪，并保护未保存到任一位置的暂存内容。 */
+    remove(c) {
+      for (const path of c.paths) {
+        validPath(path);
+        if (!own(this.state.index, path)) throw new Error('文件未被跟踪：' + path);
+        const staged = value(this.state.index, path), head = value(this.headTree(), path), work = value(this.state.work, path);
+        if (c.cached ? staged !== head && staged !== work : staged !== head || work !== undefined && work !== staged) throw new Error('删除可能丢失未提交内容，请先检查、提交或 restore：' + path);
+      }
+      for (const path of c.paths) { delete this.state.index[path]; if (!c.cached) delete this.state.work[path]; }
+      return { output: '已' + (c.cached ? '取消跟踪：' : '删除并暂存：') + c.paths.join('、'), explanation: c.cached ? '文件仍在工作区；删除跟踪记录已进入暂存区，需要提交。' : '删除已进入暂存区，需要 commit 才会写入历史。仅支持明确的文件路径。' };
+    }
+
+    /** 只移动普通文件；保留来源的暂存快照，未暂存编辑跟随文件移动。 */
+    renameFile(c) {
+      validPath(c.source); validPath(c.destination);
+      if (!own(this.state.index, c.source) || !own(this.state.work, c.source)) throw new Error('来源必须是工作区中存在的已跟踪文件。');
+      if (keys(this.state.work, this.state.index).some(p => p !== c.source && (p === c.destination || p.startsWith(c.destination + '/') || c.destination.startsWith(p + '/'))) || c.source === c.destination) throw new Error('目标路径已存在或与其他文件冲突。');
+      this.state.index[c.destination] = this.state.index[c.source]; this.state.work[c.destination] = this.state.work[c.source];
+      delete this.state.index[c.source]; delete this.state.work[c.source];
+      return { output: c.source + ' → ' + c.destination, explanation: '移动已暂存为旧路径删除和新路径增加；原来未暂存的编辑仍未暂存。教学版不进行重命名检测。' };
+    }
+
+    /** 标签固定指向提交；注解只存为教学元数据，不模拟独立 tag 对象与签名。 */
+    tag(c) {
+      if (c.action === 'list') return { output: Object.keys(this.state.tags).sort().join('\n') || '没有本地标签。', explanation: 'tag 标记版本，不会跟随分支提交自动移动。' };
+      validBranch(c.tag);
+      if (c.action === 'delete') {
+        if (!own(this.state.tags, c.tag)) throw new Error('标签不存在。');
+        delete this.state.tags[c.tag]; return { output: '已删除本地标签 ' + c.tag, explanation: '只移除本地标签，不删除提交，也不修改虚拟远程。' };
+      }
+      if (own(this.state.tags, c.tag)) throw new Error('标签已经存在，未覆盖。');
+      const id = this.resolve(c.ref); this.state.tags[c.tag] = { id, message: c.message ?? null };
+      return { output: c.tag + ' → ' + id, explanation: '本地标签已指向此提交，可用于 show、checkout 等引用；教学版不提供标签推送、签名或独立 tag 对象。' };
     }
 
     add(paths) {
@@ -379,14 +439,21 @@
       return { output: '已暂存：' + (selected.join('、') || '没有改动'), explanation: 'add 将此刻的工作区内容复制到暂存区。之后继续编辑文件，不会自动更新已经暂存的内容。冲突文件 add 后视为已解决，请自行检查是否仍留有冲突标记。' };
     }
 
-    commit(message) {
+    commit(message, options = {}) {
       const operation = this.state.pending;
+      if (options.amend && operation) throw new Error('操作处理中不能 amend，请先继续或中止。');
+      if (options.all) {
+        if (operation) throw new Error('冲突中请显式 git add 解决文件，再提交。');
+        // 已 rm --cached 的路径属于未跟踪文件，不能因 HEAD 曾有它而被 -a 重新加入。
+        for (const path of Object.keys(this.state.index)) put(this.state.index, path, value(this.state.work, path));
+      }
       if (operation?.unresolved.length) throw new Error('还有未解决的冲突，请编辑文件并 git add。');
-      if (!operation && same(this.headTree(), this.state.index)) throw new Error('没有已暂存的改动，无法创建空提交。请先编辑文件并 git add。');
-      const parents = operation ? [this.headId(), operation.other] : [this.headId()];
+      if (!operation && !options.amend && same(this.headTree(), this.state.index)) throw new Error('没有已暂存的改动，无法创建空提交。请先编辑文件并 git add。');
+      const old = this.state.commits[this.headId()]; message = message ?? old.message;
+      const parents = options.amend ? old.parents : operation ? [this.headId(), operation.other] : [this.headId()];
       const id = this.newCommit(this.state.index, parents, message);
       this.moveHead(id); this.state.pending = null;
-      return { output: '[' + (this.state.head.branch || 'detached HEAD') + ' ' + id + '] ' + message, explanation: operation ? '冲突解决完成，创建包含两个父提交的合并提交。' : 'commit 保存暂存区快照，并把当前分支和 HEAD 向前移动；尚未暂存的编辑仍留在工作区。' };
+      return { output: '[' + (this.state.head.branch || 'detached HEAD') + ' ' + id + '] ' + message, explanation: options.amend ? '用新提交替换当前提交的位置，保留原父提交；旧提交仍可通过 reflog 找到。已发布的共享提交应先与团队确认再修改。' : operation ? '冲突解决完成，创建包含两个父提交的合并提交。' : 'commit 保存暂存区快照，并把当前分支和 HEAD 向前移动；尚未暂存的编辑仍留在工作区。' };
     }
 
     branch(c) {
@@ -403,11 +470,21 @@
         if (c.all) for (const [name, id] of Object.entries(this.state.tracking)) output.push('  remotes/origin/' + name + ' → ' + id + (c.verbose ? ' ' + this.state.commits[id].message : ''));
         return { output: output.join('\n'), explanation: '-a 同时列出本地分支与本地远程跟踪引用；-vv 显示上游和领先/落后数量，依据最近一次同步。创建分支不会自动切换。' };
       }
+      if (c.action === 'rename') {
+        const from = c.branch || this.state.head.branch; validBranch(c.target);
+        if (!from || !own(this.state.branches, from)) throw new Error('找不到要改名的本地分支。');
+        if (from === c.target) return { output: '分支名称未变化。', explanation: '分支仍指向原提交。' };
+        if (own(this.state.branches, c.target)) throw new Error('目标分支名称已经存在。');
+        this.state.branches[c.target] = this.state.branches[from]; delete this.state.branches[from];
+        if (own(this.state.upstreams, from)) { this.state.upstreams[c.target] = this.state.upstreams[from]; delete this.state.upstreams[from]; }
+        if (this.state.head.branch === from) this.state.head.branch = c.target;
+        return { output: from + ' → ' + c.target, explanation: '只更改本地分支名称，提交与文件不变；原有上游配置保留，远程分支不会改名。' };
+      }
       validBranch(c.branch);
       if (c.action === 'create') {
         if (own(this.state.branches, c.branch)) throw new Error('分支已经存在：' + c.branch);
-        this.state.branches[c.branch] = this.headId();
-        return { output: '已创建分支 ' + c.branch, explanation: '新分支指向当前提交，HEAD 仍停在原分支。' };
+        this.state.branches[c.branch] = this.resolve(c.ref || 'HEAD');
+        return { output: '已创建分支 ' + c.branch, explanation: '新分支指向 ' + (c.ref || 'HEAD') + ' 对应的提交，HEAD 仍停在原位置。' };
       }
       if (!own(this.state.branches, c.branch)) throw new Error('分支不存在。');
       if (c.branch === this.state.head.branch) throw new Error('不能删除当前所在分支，请先切换到其他分支。');
@@ -420,13 +497,28 @@
 
     /** 允许带着不受切换影响的改动跨分支移动；会覆盖本地改动时拒绝整个操作。 */
     checkout(c) {
+      if (c.paths) {
+        if (!c.ref) return this.restore({ paths: c.paths });
+        const source = this.state.commits[this.resolve(c.ref)].tree;
+        const selected = c.paths.includes('.') ? Object.keys(source) : [...new Set(c.paths)];
+        for (const path of c.paths.filter(p => p !== '.')) { validPath(path); if (!own(source, path)) throw new Error('指定提交中没有该文件：' + path); }
+        const index = clone(this.state.index), work = clone(this.state.work);
+        for (const path of selected) index[path] = work[path] = source[path];
+        checkTreePaths(index); checkTreePaths(work); this.state.index = index; this.state.work = work;
+        return { output: '已从 ' + c.ref + ' 恢复：' + selected.join('、'), explanation: 'checkout <提交> -- <文件> 同时恢复暂存区和工作区，不切换 HEAD；checkout -- <文件> 只从暂存区恢复工作区。' };
+      }
+      const previous = clone(this.state.head);
+      if (c.ref === '-') {
+        if (!this.state.previousCheckout) throw new Error('本次练习还没有上一次分支切换记录。');
+        c = { ...c, ref: this.state.previousCheckout.branch || this.state.previousCheckout.id, detach: !this.state.previousCheckout.branch };
+      }
       if (c.create) {
         validBranch(c.ref);
         if (own(this.state.branches, c.ref)) throw new Error('分支已经存在。');
         this.state.branches[c.ref] = this.headId(); this.state.head = { branch: c.ref, id: null };
       } else {
-        const id = this.resolve(c.ref), isBranch = own(this.state.branches, c.ref);
-        if (c.name === 'switch' && !isBranch) throw new Error('switch 需要本地分支名；查看某个提交请用 checkout。');
+        const id = this.resolve(c.ref), isBranch = !c.detach && own(this.state.branches, c.ref);
+        if (c.name === 'switch' && !isBranch && !c.detach) throw new Error('switch 需要本地分支名；查看提交请用 switch --detach 或 checkout。');
         const old = this.headTree(), target = this.state.commits[id].tree;
         const nextIndex = clone(this.state.index), nextWork = clone(this.state.work);
         for (const path of keys(old, target, this.state.index, this.state.work)) {
@@ -442,6 +534,7 @@
         this.state.head = { branch: isBranch ? c.ref : null, id: isBranch ? null : id };
         this.state.index = nextIndex; this.state.work = nextWork;
       }
+      this.state.previousCheckout = previous;
       return { output: '已切换到 ' + (this.state.head.branch || ('分离 HEAD ' + this.headId())), explanation: this.state.head.branch ? 'HEAD 现在跟随这个分支；后续提交只会移动当前分支。' : 'HEAD 直接指向提交，处于分离状态。可用 switch -c 新建分支来保存后续提交。' };
     }
 
@@ -531,12 +624,49 @@
       return { output: '已创建反向提交 ' + next, explanation: 'revert 添加一个抵消指定改动的新提交，保留原来的历史和分支前进方向。' };
     }
 
+    /** 摘取的是提交相对父提交的改动；不合并来源分支的全部历史，也不直接复制整份快照。 */
+    cherryPick(c) {
+      this.requireClean('cherry-pick');
+      const queue = c.refs.map(ref => this.resolve(ref));
+      if (queue.some(id => this.state.commits[id].parents.length > 1)) throw new Error('教学版 cherry-pick 仅支持普通提交，不支持需要 -m 指定主线的合并提交。');
+      this.state.pending = { type: 'cherry-pick', saved: this.snapshot(), queue, cursor: 0, unresolved: [], conflicts: {}, rewritten: [] };
+      return this.advanceCherryPick();
+    }
+
+    advanceCherryPick() {
+      const op = this.state.pending;
+      while (op.cursor < op.queue.length) {
+        const original = this.state.commits[op.queue[op.cursor]], base = original.parents.length ? this.state.commits[original.parents[0]].tree : {};
+        const result = this.mergeTrees(base, this.headTree(), original.tree, original.id + ' ' + original.message);
+        this.applyMerge(result, op);
+        if (op.unresolved.length) return this.conflictResult();
+        if (same(this.headTree(), this.state.index)) return { paused: true, output: '当前摘取改动为空：' + original.id + '。使用 git cherry-pick --skip 跳过，或 --abort 恢复起点。', explanation: '这份改动可能已经存在，或原提交为空；与 Git 默认行为一样暂停，不伪造新提交。' };
+        const id = this.newCommit(this.state.index, [this.headId()], original.message);
+        this.moveHead(id); op.rewritten.push([original.id, id]); op.cursor++;
+      }
+      const changes = op.rewritten.map(pair => pair.join(' → ')).join('，'); this.state.pending = null;
+      return { output: '摘取完成。' + (changes || '全部已跳过。'), explanation: '仅把指定提交的改动逐个应用到当前分支，每次生成一个普通提交；来源分支和原提交保持不变。' };
+    }
+
+    skipCherryPick() {
+      const op = this.state.pending;
+      if (!op || op.type !== 'cherry-pick') throw new Error('没有进行中的 cherry-pick 操作。');
+      this.installTree(this.headTree()); op.cursor++; op.unresolved = []; op.conflicts = {};
+      return this.advanceCherryPick();
+    }
+
     continueOperation(type) {
       const op = this.state.pending;
       if (!op || op.type !== type) throw new Error('没有进行中的 ' + type + ' 操作。');
       if (op.unresolved.length) throw new Error('请先解决所有冲突，并 git add 对应文件。');
       if (type === 'merge') return this.commit(op.message);
       if (!same(this.state.work, this.state.index)) throw new Error('工作区与暂存区仍有差异，请先检查并暂存解决结果。');
+      if (type === 'cherry-pick') {
+        if (same(this.headTree(), this.state.index)) throw new Error('解决结果没有新的改动，请使用 cherry-pick --skip 跳过或 --abort 中止。');
+        const original = this.state.commits[op.queue[op.cursor]], id = this.newCommit(this.state.index, [this.headId()], original.message);
+        this.moveHead(id); op.rewritten.push([original.id, id]); op.cursor++;
+        return this.advanceCherryPick();
+      }
       if (type === 'rebase') {
         const original = this.state.commits[op.queue[op.cursor]];
         if (!same(this.headTree(), this.state.index)) {
@@ -554,8 +684,8 @@
     abort(type) {
       const op = this.state.pending;
       if (!op || op.type !== type) throw new Error('没有进行中的 ' + type + ' 操作。');
-      const { commits, nextId, remote } = this.state;
-      this.state = clone(op.saved); this.state.commits = commits; this.state.nextId = nextId; this.state.remote = remote;
+      const { commits, nextId, remote, reflog } = this.state;
+      this.state = clone(op.saved); this.state.commits = commits; this.state.nextId = nextId; this.state.remote = remote; this.state.reflog = reflog;
       return { output: '已中止 ' + type, explanation: 'HEAD、分支标签、工作区和暂存区恢复到本次操作前。' };
     }
 
@@ -622,7 +752,7 @@
     loadScene(scene) {
       if (!own(SCENES, scene)) throw new Error('未知练习场景。');
       this.scene = scene;
-      this.state = { commits: {}, branches: {}, head: { branch: 'main', id: null }, index: {}, work: {}, stashes: [], pending: null, remote: { commits: {}, branches: {} }, tracking: {}, upstreams: { main: 'main' }, nextId: 0 };
+      this.state = { commits: {}, branches: {}, tags: {}, head: { branch: 'main', id: null }, index: {}, work: {}, stashes: [], reflog: [], previousCheckout: null, pending: null, remote: { commits: {}, branches: {} }, tracking: {}, upstreams: { main: 'main' }, nextId: 0 };
       const tree = { 'hello.txt': '你好，Git！\n这是一段问候。\n保留这一行作为共同上下文。\n学习从一次提交开始。\n', 'README.md': '# Git Playground\n\n在这里安心练习 Git。\n' };
       const first = this.newCommit(tree, [], '初始化练习仓库');
       this.state.branches.main = first; this.installTree(tree);
@@ -649,6 +779,7 @@
         save('本地：新增学习记录', t => { t['notes.txt'] = '这是本地的提交。\n'; });
         this.simulateRemote();
       }
+      this.state.reflog = [{ id: this.headId(), message: '练习场景起点' }];
     }
   }
 

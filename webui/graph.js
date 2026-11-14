@@ -17,6 +17,7 @@
 
     references(state) {
       const refs = [
+        ...Object.entries(state.tags || {}).map(([name, tag]) => ({ key: 'tag:' + name, text: 'tag: ' + name, id: tag.id, color: '#fde68a' })),
         ...Object.entries(state.branches).map(([name, id]) => ({ key: 'local:' + name, text: name + (state.head.branch === name ? '*' : ''), id, active: state.head.branch === name, color: '#3988b6' })),
         ...Object.entries(state.tracking).map(([name, id]) => ({ key: 'tracking:' + name, text: 'origin/' + name, id, color: '#b4d3e1', small: true })),
         ...Object.entries(state.remote.branches).filter(([name, id]) => state.tracking[name] !== id).map(([name, id]) => ({ key: 'remote:' + name, text: '远端/' + name, id, color: '#b5b0ed', small: true }))
@@ -112,7 +113,7 @@
       const head = state.head.branch ? state.branches[state.head.branch] : state.head.id;
       const reachable = new Set();
       const visit = id => { if (!id || reachable.has(id)) return; reachable.add(id); layout.objects[id].parents.forEach(visit); };
-      [...Object.values(state.branches), ...Object.values(state.tracking), ...Object.values(state.remote.branches), head].forEach(visit);
+      [...Object.values(state.branches), ...Object.values(state.tracking), ...Object.values(state.remote.branches), ...Object.values(state.tags || {}).map(tag => tag.id), head].forEach(visit);
       for (const route of layout.edges) {
         const edge = element('path', { class: 'commit-edge', d: route.path, 'marker-end': 'url(#parent-arrow)' });
         if (!reachable.has(route.commit)) { edge.setAttribute('opacity', '.28'); edge.setAttribute('stroke-dasharray', '5 4'); }
