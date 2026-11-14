@@ -180,6 +180,54 @@ test('远程追加保留既有空文件，原末行没有换行时仍新增独�
   }
 });
 
+test('指定 dev 模拟提交从远程 dev 快照继续，其他引用与本地未推送内容均不改变', () => {
+  const sim = new Simulator(); run(sim, 'git switch -c dev');
+  change(sim, 'hello.txt', '远程 dev 的版本\n'); run(sim, 'git push -u origin dev');
+  change(sim, 'hello.txt', '本地 dev 尚未推送的版本\n'); run(sim, 'git switch main');
+  sim.editFile('local-only.txt', '本地未跟踪内容\n');
+  const before = sim.snapshot(), result = sim.simulateRemote('dev');
+  assert.equal(result.ok, true); assert.equal(result.branch, 'dev');
+  const commit = sim.state.remote.commits[result.commitId];
+  assert.deepEqual(commit.parents, [before.remote.branches.dev]);
+  assert.equal(commit.tree['hello.txt'], '远程 dev 的版本\n');
+  assert.equal(commit.tree['local-only.txt'], undefined);
+  assert.equal(sim.state.remote.branches.main, before.remote.branches.main);
+  assert.match(result.output, /虚拟远程 dev 新增/); assert.match(result.explanation, /远程 dev/);
+  for (const key of Object.keys(before).filter(key => !['remote', 'nextId'].includes(key))) assert.deepEqual(sim.state[key], before[key], key);
+  run(sim, 'git fetch');
+  assert.equal(sim.state.tracking.dev, result.commitId); assert.equal(sim.state.tracking.main, before.tracking.main);
+  assert.equal(sim.state.head.branch, 'main'); assert.deepEqual(sim.state.work, before.work);
+  const rejected = sim.snapshot(); assert.equal(sim.execute('git push origin dev').ok, false); assert.deepEqual(sim.snapshot(), rejected);
+});
+
+test('不同远程分支各自连续追加，目标不随本地 HEAD 变化，默认仍为 main', () => {
+  const sim = new Simulator(); run(sim, 'git switch -c dev'); run(sim, 'git push -u origin dev');
+  const first = sim.simulateRemote('dev'), dev = structuredClone(sim.state.remote.commits[first.commitId]);
+  const main = sim.simulateRemote(); assert.equal(main.branch, 'main');
+  assert.equal(sim.state.head.branch, 'dev'); assert.equal(sim.state.remote.branches.dev, first.commitId);
+  const last = sim.simulateRemote('dev');
+  assert.deepEqual(sim.state.remote.commits[last.commitId].parents, [first.commitId]);
+  assert.equal(sim.state.remote.branches.main, main.commitId);
+  assert.equal(sim.state.remote.commits[last.commitId].tree['team.txt'], dev.tree['team.txt'] + '协作者更新 ' + (sim.state.nextId - 1) + '\n');
+  assert.deepEqual(sim.state.remote.commits[first.commitId], dev);
+});
+
+test('仅本地分支、跟踪引用及非法目标不创建远程分支，失败保持完整状态', () => {
+  const sim = new Simulator(); run(sim, 'git branch dev');
+  for (const branch of ['dev', 'origin/main', 'missing', '', null, 0, {}, '__proto__', 'toString']) {
+    const before = sim.snapshot(), result = sim.simulateRemote(branch);
+    assert.equal(result.ok, false, String(branch)); assert.match(result.explanation, /git push -u origin/);
+    assert.deepEqual(sim.snapshot(), before);
+  }
+});
+
+test('没有远程 main 时默认选已有分支；完全没有远程分支时返回失败', () => {
+  const sim = new Simulator(); sim.state.remote.branches = { dev: sim.state.remote.branches.main };
+  assert.equal(sim.simulateRemote().branch, 'dev');
+  sim.state.remote.branches = {}; const before = sim.snapshot();
+  assert.equal(sim.simulateRemote().ok, false); assert.deepEqual(sim.snapshot(), before);
+});
+
 for (const rebase of [false, true]) test('非快进推送拒绝，pull ' + (rebase ? '--rebase' : '--no-rebase') + ' 整合后可推送', () => {
   const sim = new Simulator('remote'); assert.equal(sim.execute('git push').ok, false);
   run(sim, 'git pull ' + (rebase ? '--rebase' : '--no-rebase') + ' origin main'); run(sim, 'git push');

@@ -739,9 +739,13 @@
       return { output: source + ' → origin/' + destination + '：' + id, explanation: 'push 上传提交并移动远程分支，同时更新本地对应的远程跟踪引用。它不会自动合并远程分叉。' };
     }
 
-    /** 虚拟协作者独立推进远程分支；本地 origin/* 必须等 fetch 后才会变化。 */
-    simulateRemote() {
-      const branch = this.state.remote.branches.main ? 'main' : Object.keys(this.state.remote.branches)[0];
+    /** 在指定的已有远程分支追加提交；省略时优先 main，本地 origin/* 必须等 fetch 后才会变化。 */
+    simulateRemote(branch) {
+      if (branch === undefined) branch = own(this.state.remote.branches, 'main') ? 'main' : Object.keys(this.state.remote.branches)[0];
+      // 不把本地分支或跟踪引用误当作远程实际分支，校验失败时不创建对象或消耗提交编号。
+      if (typeof branch !== 'string' || !own(this.state.remote.branches, branch)) {
+        return { ok: false, output: '请选择一个已存在的远程分支。', explanation: '本地新分支需要先执行 git push -u origin <分支名>，才能在远程模拟他人提交。' };
+      }
       const old = this.state.remote.branches[branch], previous = this.state.remote.commits[old].tree, tree = clone(previous);
       const path = 'team.txt', added = '协作者更新 ' + this.state.nextId;
       const content = own(tree, path) ? tree[path] : '团队协作记录\n';
@@ -750,9 +754,9 @@
       const message = '协作者：在 team.txt 追加“' + added + '”';
       const id = this.newCommit(tree, [old], message, true); this.state.remote.branches[branch] = id;
       return {
-        ok: true, commitId: id,
+        ok: true, commitId: id, branch,
         output: '虚拟远程 ' + branch + ' 新增 ' + id + '\n提交说明：' + message + '\n本次文件变更：\n' + treeDiff(previous, tree),
-        explanation: '协作者已在远程 team.txt 追加一行“' + added + '”。本地 origin/' + branch + '、工作区和暂存区尚未变化；fetch 下载提交，pull 才整合到本地文件。'
+        explanation: '协作者已在远程 ' + branch + ' 的 team.txt 追加一行“' + added + '”。本地 origin/' + branch + '、工作区和暂存区尚未变化；fetch 下载提交，pull 才整合到本地文件。'
       };
     }
 

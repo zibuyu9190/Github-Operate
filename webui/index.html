@@ -46,7 +46,11 @@
           <div class="terminal" id="terminal" role="log" aria-label="命令执行记录" aria-live="polite"></div>
           <form id="command-form" autocomplete="off"><label class="sr-only" for="command">Git 命令</label><div class="command-input"><span aria-hidden="true">$</span><input id="command" name="command" placeholder="git status" spellcheck="false" autocomplete="off" autocapitalize="off"><button type="submit" aria-label="执行命令">↵</button></div><div class="input-tip"><span>Enter 执行</span><span>↑ ↓ 历史命令</span></div></form>
           <div class="suggestions"><div class="small-label">试试这些命令 <span>点击填入</span></div><div id="quick-commands"></div></div>
-          <div class="remote-panel"><div class="remote-heading"><strong><span aria-hidden="true">☁</span> 虚拟远程 · origin</strong><button id="remote-commit" class="text-button">＋ 模拟他人提交</button></div><div id="remote-refs"></div><p>远程实际状态与本地 origin/* 独立更新。</p></div>
+          <div class="remote-panel"><div class="remote-heading"><strong><span aria-hidden="true">☁</span> 虚拟远程 · origin</strong><button id="remote-commit" class="text-button" type="button">＋ 模拟他人提交</button></div><div class="remote-branch-controls">
+            <label for="remote-branch">提交到远程分支</label>
+            <select id="remote-branch" aria-describedby="remote-branch-hint"></select>
+          </div>
+          <p id="remote-branch-hint" role="status"></p><div id="remote-refs"></div><p>远程实际状态与本地 origin/* 独立更新。</p></div>
         </section>
       </div>
       <section class="transition-card" aria-label="命令变化讲解"><div class="transition-icon" aria-hidden="true">↳</div><div class="transition-copy"><strong id="explanation-title">从一次小小的改动开始</strong><p id="explanation" aria-live="polite"></p><div id="flow" class="flow" aria-hidden="true"></div></div><button id="replay" class="button quiet" disabled>▷ 重播变化</button></section>

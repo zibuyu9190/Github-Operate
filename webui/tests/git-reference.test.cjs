@@ -209,6 +209,22 @@ test('真实 Git 对照：离线裸仓库 fetch、pull 两种整合及 push 拒�
   }
 });
 
+test('真实 Git 对照：协作者只推进远程 dev，fetch 与 pull 不误移动 main', t => {
+  const f = fixture(t), remotePath = path.resolve(f.directory, '../remote.git'), collaborator = path.resolve(f.directory, '../collaborator');
+  f.git(['init', '--bare', '-b', 'main', remotePath]); f.git(['remote', 'add', 'origin', remotePath]); f.command('push', '-u', 'origin', 'main');
+  f.command('switch', '-c', 'dev'); f.edit('hello.txt', 'dev 分支独有内容\n'); f.commit('准备 dev'); f.command('push', '-u', 'origin', 'dev'); f.command('switch', 'main');
+  const main = f.git(['rev-parse', 'main'], false, remotePath).stdout.trim(), local = f.sim.snapshot();
+  f.git(['clone', remotePath, collaborator]); f.git(['switch', '-c', 'dev', 'origin/dev'], false, collaborator);
+  fs.writeFileSync(path.join(collaborator, 'team.txt'), '团队协作记录\n协作者更新 ' + f.sim.state.nextId + '\n', 'utf8');
+  f.git(['add', '.'], false, collaborator); f.git(['commit', '-m', '协作者：在 team.txt 追加“协作者更新 ' + f.sim.state.nextId + '”'], false, collaborator); f.git(['push', 'origin', 'dev'], false, collaborator);
+  const result = f.sim.simulateRemote('dev'); assert.equal(result.ok, true);
+  assert.equal(f.sim.state.remote.branches.main, local.remote.branches.main); assert.equal(f.sim.state.tracking.dev, local.tracking.dev);
+  f.command('fetch'); assert.equal(f.sim.state.tracking.dev, result.commitId); f.assertState();
+  f.command('switch', 'dev'); f.command('pull', '--no-rebase', 'origin', 'dev'); f.assertState();
+  assert.equal(f.git(['rev-parse', 'main'], false, remotePath).stdout.trim(), main);
+  assert.equal(f.sim.state.branches.main, local.branches.main);
+});
+
 test('真实 Git 对照：cherry-pick 只摘取指定补丁，多提交顺序一致', t => {
   const f = fixture(t); f.command('switch', '-c', 'source');
   f.edit('excluded.txt', '不摘取\n'); f.commit('来源一'); f.edit('selected.txt', '摘取\n'); f.commit('来源二');

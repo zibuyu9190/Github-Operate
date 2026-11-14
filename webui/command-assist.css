@@ -70,3 +70,22 @@
 .help-expanded-grid .help-row > span { text-align: left; overflow-wrap: anywhere; }
 .help-reference-row code { cursor: text; }
 .help-reference-row a { color: #0f766e; }
+
+/* 远程目标独立于本地分支，用明确标签和原生选择框支持键盘及长分支名称。 */
+.remote-heading { flex-wrap: wrap; }
+.remote-branch-controls { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
+.remote-branch-controls label { flex: none; color: #cbd5e1; font-size: 11px; }
+.remote-branch-controls select {
+  flex: 1; min-width: 0; max-width: 100%; min-height: 30px; padding: 4px 6px;
+  border: 1px solid #475569; border-radius: 5px; background: #131c31; color: #e2e8f0;
+  font: 12px var(--mono, monospace); color-scheme: dark;
+}
+.remote-branch-controls select:focus-visible { outline: 2px solid #34d399; outline-offset: 2px; }
+.remote-branch-controls option:disabled { color: #94a3b8; }
+#remote-branch-hint { line-height: 1.6; overflow-wrap: anywhere; }
+.remote-ref span { min-width: 0; overflow-wrap: anywhere; }
+.remote-ref b { flex: none; }
+.remote-heading .text-button:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 680px) {
+  .remote-branch-controls select { font-size: 16px; }
+}

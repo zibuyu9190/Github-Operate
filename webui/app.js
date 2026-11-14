@@ -6,6 +6,7 @@
   const sim = new Simulator();
   let lesson = new GitLessons.Practice(sim.scene, sim.snapshot());
   let selectedFile = 'hello.txt', selectedCommit = null, dirty = false, history = [], historyIndex = 0, draft = '', lastResult = null, replayTimer = null;
+  let remoteBranch = null;
   const graph = new CommitGraph($('graph'), showCommit);
   const graphViewer = new GitGraphViewer(graph, $('graph-stage'), () => ({ state: sim.state, title: SCENES[sim.scene].title }), cancelReplay);
   const assistant = new GitCommandAssist.Controller($('command'), assistContext);
@@ -80,7 +81,7 @@
 
   function loadScene(scene) {
     const previousRoute = lesson.scene === scene ? lesson.route : undefined;
-    cancelReplay(); sim.loadScene(scene); selectedFile = 'hello.txt'; selectedCommit = null; dirty = false; lastResult = null;
+    cancelReplay(); sim.loadScene(scene); selectedFile = 'hello.txt'; selectedCommit = null; remoteBranch = null; dirty = false; lastResult = null;
     lesson = new GitLessons.Practice(scene, sim.snapshot(), previousRoute);
     graph.previous = new Map(); graph.previousTags = new Map();
     const info = SCENES[scene], index = Object.keys(SCENES).indexOf(scene);
@@ -103,6 +104,20 @@
   }
 
   function renderRemote() {
+    const branches = Object.keys(sim.state.remote.branches).sort();
+    const localOnly = Object.keys(sim.state.branches).filter(branch => !Object.hasOwn(sim.state.remote.branches, branch)).sort();
+    // 手动选择独立于本地 HEAD；执行命令后保留选择，切换场景才重置默认目标。
+    if (!branches.includes(remoteBranch)) remoteBranch = branches.includes('main') ? 'main' : branches[0];
+    const options = branches.map(branch => { const option = node('option', '', branch); option.value = branch; return option; });
+    for (const branch of localOnly) {
+      const option = node('option', '', branch + '（仅本地，需先 push）'); option.value = branch; option.disabled = true; options.push(option);
+    }
+    if (!branches.length) { const option = node('option', '', '暂无远程分支'); option.value = ''; options.unshift(option); }
+    $('remote-branch').replaceChildren(...options); $('remote-branch').value = remoteBranch || '';
+    $('remote-branch').disabled = !branches.length; $('remote-commit').disabled = !branches.length;
+    $('remote-commit').title = branches.length ? '在远程 ' + remoteBranch + ' 上追加一次提交，不切换本地分支' : '先推送一个分支到虚拟远程';
+    $('remote-branch-hint').replaceChildren(document.createTextNode('只推进所选远程分支，不切换本地分支。'));
+    if (localOnly.length) $('remote-branch-hint').append(document.createTextNode('先发布本地分支，例如：'), node('code', '', 'git push -u origin ' + localOnly[0]));
     $('remote-refs').replaceChildren();
     for (const [branch, id] of Object.entries(sim.state.remote.branches)) {
       for (const [label, target] of [['远程实际 ' + branch, id], ['本地 origin/' + branch, sim.state.tracking[branch] || '尚未同步']]) {
@@ -418,9 +433,11 @@
       dirty = false; renderFiles(); message('已选择此版本，请检查内容，再 git add 并继续。');
     });
   }
+  $('remote-branch').addEventListener('change', () => { remoteBranch = $('remote-branch').value; renderRemote(); });
   $('remote-commit').addEventListener('click', () => {
-    cancelReplay(); const before = sim.snapshot(), result = sim.simulateRemote();
-    terminalEntry('☁ 虚拟协作者', result.output); render(true); updateExplanation(result, '远程新增了一次提交');
+    cancelReplay(); const before = sim.snapshot(), result = sim.simulateRemote(remoteBranch);
+    terminalEntry('☁ 虚拟协作者 · origin/' + remoteBranch, result.output, result); render(result.ok); updateExplanation(result, '远程 ' + (result.branch || remoteBranch) + ' 新增了一次提交');
+    if (!result.ok) return;
     showCommit(sim.state.remote.commits[result.commitId], true);
     lastResult = { ...result, before, after: sim.snapshot() }; $('replay').disabled = false;
   });
