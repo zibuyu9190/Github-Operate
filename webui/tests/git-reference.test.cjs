@@ -22,7 +22,8 @@ function fixture(t) {
   });
   const git = (args, allowedFailure = false, cwd = directory) => {
     const result = spawnSync('git', ['-c', 'user.name=Git Playground Test', '-c', 'user.email=playground@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', '-c', 'core.autocrlf=false', '-c', 'core.editor=true', '-c', 'core.hooksPath=' + emptyHooks, ...args], {
-      cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' }
+      // 环境变量优先于 core.editor；测试沿用已有说明，不能被宿主的失败或交互式编辑器阻断。
+      cwd, encoding: 'utf8', env: { ...process.env, GIT_EDITOR: 'true', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' }
     });
     if (!allowedFailure) assert.equal(result.status, 0, args.join(' ') + '\n' + result.stderr + result.stdout);
     return result;
