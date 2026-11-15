@@ -86,6 +86,28 @@
 .remote-ref span { min-width: 0; overflow-wrap: anywhere; }
 .remote-ref b { flex: none; }
 .remote-heading .text-button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* 两种编辑身份复用三栏布局；协作者的保存、暂存和提交按钮与本地命令入口分开标识。 */
+.editor-mode-bar { display: flex; gap: 6px; padding: 9px 14px; border-bottom: 1px solid #dbe5ec; background: #f8fafc; }
+.editor-mode-bar button[aria-pressed="true"] { color: #065f46; background: #d1fae5; border-color: #34d399; font-weight: 700; }
+.remote-editor-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 14px; background: #f0fdfa; border-bottom: 1px solid #99f6e4; }
+.remote-editor-toolbar label, .remote-editor-actions label { font-size: 12px; font-weight: 700; }
+.remote-editor-toolbar select { min-width: 90px; max-width: 100%; padding: 5px 8px; background: #fff; color: #0f172a; border: 1px solid #94a3b8; border-radius: 6px; }
+.remote-editor-base { flex-basis: 100%; margin: 0; color: #475569; font-size: 11px; overflow-wrap: anywhere; }
+.remote-editor-base.error { color: #b91c1c; }
+.remote-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 14px; border-top: 1px solid #dbe5ec; background: #f0fdfa; }
+.remote-editor-actions input { flex: 1; min-width: 160px; padding: 8px 10px; border: 1px solid #94a3b8; border-radius: 6px; background: #fff; color: #0f172a; font: inherit; font-size: 12px; }
+.remote-editor-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.remote-command-hint { flex-basis: 100%; margin: 0; color: #475569; font-size: 11px; line-height: 1.6; }
+.remote-editor-toolbar[hidden], .remote-editor-actions[hidden] { display: none; }
+.files-panel.editing-remote { overflow: auto; }
+/* 新增控制栏不能挤掉文件内容；小屏三栏纵排后由内容撑高，避免最后一栏被遮住。 */
+.editing-remote .areas { flex-shrink: 0; min-height: 180px; }
+.editing-remote .area-heading { background: #f0fdfa; }
 @media (max-width: 680px) {
+  .files-panel.editing-remote { flex: none; }
+  .editing-remote .areas { flex: none; grid-auto-rows: minmax(180px, auto); }
   .remote-branch-controls select { font-size: 16px; }
+  .remote-editor-actions input { flex-basis: 100%; font-size: 16px; }
+  .remote-editor-toolbar select { font-size: 16px; }
 }

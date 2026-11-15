@@ -1,17 +1,92 @@
 (function () {
   'use strict';
-  const { Simulator, SCENES, edits } = GitSimulator;
+  const { Simulator, RemoteWorkspace, SCENES, edits } = GitSimulator;
   const $ = id => document.getElementById(id);
   const node = (tag, className, text) => { const item = document.createElement(tag); if (className) item.className = className; if (text !== undefined) item.textContent = text; return item; };
   const sim = new Simulator();
   let lesson = new GitLessons.Practice(sim.scene, sim.snapshot());
   let selectedFile = 'hello.txt', selectedCommit = null, dirty = false, history = [], historyIndex = 0, draft = '', lastResult = null, replayTimer = null;
   let remoteBranch = null;
+  let editorMode = 'local', localBuffer = '';
+  const remoteSessions = new Map();
   const graph = new CommitGraph($('graph'), showCommit);
   const graphViewer = new GitGraphViewer(graph, $('graph-stage'), () => ({ state: sim.state, title: SCENES[sim.scene].title }), cancelReplay);
   const assistant = new GitCommandAssist.Controller($('command'), assistContext);
   const lessonView = new GitLessons.View($('graph-stage'), fillCommand, route => { lesson.route = route; renderLesson(); });
   const labels = ['编辑与提交', '分叉与汇合', '解决同一行冲突', '改变提交的基点', '理解三种模式', '本地与远程同步'];
+  const filePanel = $('files-title').closest('.files-panel');
+  const modeBar = node('div', 'editor-mode-bar'); modeBar.setAttribute('role', 'group'); modeBar.setAttribute('aria-label', '选择文件编辑身份');
+  const localModeButton = node('button', 'button quiet small', '我的本地'), remoteModeButton = node('button', 'button quiet small', '模拟协作者');
+  localModeButton.type = remoteModeButton.type = 'button'; localModeButton.id = 'editor-local'; remoteModeButton.id = 'editor-remote';
+  localModeButton.addEventListener('click', () => switchEditorMode('local'));
+  remoteModeButton.addEventListener('click', () => switchEditorMode('remote'));
+  modeBar.append(localModeButton, remoteModeButton); $('new-file-form').before(modeBar);
+  const remoteToolbar = node('div', 'remote-editor-toolbar');
+  const remoteBranchLabel = node('label', '', '协作者远程分支'); remoteBranchLabel.htmlFor = 'editor-remote-branch';
+  const remoteBranchSelect = node('select'); remoteBranchSelect.id = 'editor-remote-branch';
+  remoteBranchSelect.addEventListener('change', () => { remoteBranch = remoteBranchSelect.value; renderRemote(); renderFiles(); message(); });
+  const reloadRemote = node('button', 'button quiet small', '重新载入远程'); reloadRemote.type = 'button';
+  reloadRemote.title = '丢弃所选分支的协作者草稿，重新读取远程最新提交';
+  reloadRemote.addEventListener('click', () => { remoteSessions.delete(remoteBranch); renderFiles(); message('已重新载入远程，此分支的协作者草稿已清空。'); });
+  const remoteBase = node('p', 'remote-editor-base'); remoteBase.id = 'remote-editor-base'; remoteBase.setAttribute('role', 'status');
+  remoteToolbar.append(remoteBranchLabel, remoteBranchSelect, reloadRemote, remoteBase); modeBar.after(remoteToolbar);
+  const remoteActions = node('div', 'remote-editor-actions');
+  const remoteMessageLabel = node('label', '', '协作者提交说明'); remoteMessageLabel.htmlFor = 'remote-message';
+  const remoteMessage = node('input'); remoteMessage.id = 'remote-message'; remoteMessage.maxLength = 200; remoteMessage.placeholder = '例如：调整 dev 分支的问候语';
+  remoteMessage.addEventListener('input', () => { const session = remoteSession(); if (session) session.message = remoteMessage.value; });
+  const stageRemoteFile = node('button', 'button quiet small', '暂存当前文件'), stageRemoteAll = node('button', 'button quiet small', '暂存全部'), submitRemote = node('button', 'button primary small', '提交到远程');
+  stageRemoteFile.type = stageRemoteAll.type = submitRemote.type = 'button'; stageRemoteFile.id = 'remote-stage-file'; stageRemoteAll.id = 'remote-stage-all'; submitRemote.id = 'remote-submit';
+  stageRemoteFile.addEventListener('click', () => stageRemote(false)); stageRemoteAll.addEventListener('click', () => stageRemote(true)); submitRemote.addEventListener('click', commitRemoteEditor);
+  const remoteCommandHint = node('p', 'remote-command-hint', '协作者：编辑 → 保存 → 暂存 → 填写说明 → 提交到远程。右侧命令框操作“我的本地”，执行命令会切回本地视图。');
+  remoteActions.append(remoteMessageLabel, remoteMessage, stageRemoteFile, stageRemoteAll, submitRemote, remoteCommandHint); $('file-message').before(remoteActions);
+
+  /** 远程草稿按分支保留；远程被推进时，只自动刷新没有编辑内容的干净草稿。 */
+  function remoteSession() {
+    const tip = sim.state.remote.branches[remoteBranch]; if (!tip) return null;
+    let session = remoteSessions.get(remoteBranch);
+    if (!session || (session.workspace.baseId !== tip && session.workspace.isClean() && !session.dirty && !session.message)) {
+      const workspace = new RemoteWorkspace(remoteBranch, sim.state.remote.commits[tip]);
+      session = { workspace, selectedFile: Object.hasOwn(workspace.work, 'hello.txt') ? 'hello.txt' : Object.keys(workspace.work)[0] || '', dirty: false, buffer: '', message: '' };
+      remoteSessions.set(remoteBranch, session);
+    }
+    return session;
+  }
+
+  function localEditorText() { return editorMode === 'local' ? $('file-editor').value : localBuffer; }
+
+  function switchEditorMode(mode) {
+    if (mode === editorMode) return;
+    if (editorMode === 'local') localBuffer = $('file-editor').value;
+    editorMode = mode; $('new-file-form').hidden = true;
+    if (mode === 'local') $('file-editor').value = localBuffer;
+    message(); renderFiles();
+  }
+
+  function saveRemoteEditor(quiet = false) {
+    const session = remoteSession(); if (!session || !session.selectedFile) return false;
+    try {
+      session.workspace.editFile(session.selectedFile, $('file-editor').value); session.dirty = false;
+      renderFiles(); if (!quiet) message('已保存到协作者工作区，请暂存后提交到远程。'); return true;
+    } catch (error) { message(error.message, true); return false; }
+  }
+
+  function stageRemote(all) {
+    const session = remoteSession(); if (!session || (session.dirty && !saveRemoteEditor(true))) return;
+    try { session.workspace.stage(all ? '.' : [session.selectedFile]); renderFiles(); message('已暂存协作者的' + (all ? '全部改动' : '当前文件') + '，可以填写说明后提交。'); }
+    catch (error) { message(error.message, true); }
+  }
+
+  function commitRemoteEditor() {
+    const session = remoteSession(); if (!session || (session.dirty && !saveRemoteEditor(true))) return;
+    cancelReplay(); const before = sim.snapshot();
+    const result = sim.commitRemote(remoteBranch, { baseId: session.workspace.baseId, tree: session.workspace.index, message: session.message });
+    terminalEntry('☁ 协作者提交 · origin/' + remoteBranch, result.output, result);
+    if (!result.ok) { message(result.output, true); return; }
+    const commit = sim.state.remote.commits[result.commitId]; session.workspace.acceptCommit(commit); session.message = '';
+    render(true); updateExplanation(result, '协作者提交到远程 ' + remoteBranch); showCommit(commit, true);
+    lastResult = { ...result, before, after: sim.snapshot() }; $('replay').disabled = false;
+    message('已提交到远程 ' + remoteBranch + '。本地尚未同步，可切回“我的本地”执行 fetch 或 pull。');
+  }
 
   /** 草稿也参与下一步推荐，但读取建议本身不会保存文件或改变虚拟仓库。 */
   function assistContext() {
@@ -19,8 +94,8 @@
     let state = sim.state;
     if (dirty && selectedFile) {
       const file = files.find(file => file.path === selectedFile);
-      if (file) file.unstaged = $('file-editor').value !== sim.state.index[selectedFile];
-      state = { ...sim.state, work: { ...sim.state.work, [selectedFile]: $('file-editor').value } };
+      if (file) file.unstaged = localEditorText() !== sim.state.index[selectedFile];
+      state = { ...sim.state, work: { ...sim.state.work, [selectedFile]: localEditorText() } };
     }
     return { state, files, scene: sim.scene };
   }
@@ -82,6 +157,7 @@
   function loadScene(scene) {
     const previousRoute = lesson.scene === scene ? lesson.route : undefined;
     cancelReplay(); sim.loadScene(scene); selectedFile = 'hello.txt'; selectedCommit = null; remoteBranch = null; dirty = false; lastResult = null;
+    editorMode = 'local'; localBuffer = ''; remoteSessions.clear();
     lesson = new GitLessons.Practice(scene, sim.snapshot(), previousRoute);
     graph.previous = new Map(); graph.previousTags = new Map();
     const info = SCENES[scene], index = Object.keys(SCENES).indexOf(scene);
@@ -114,8 +190,9 @@
     }
     if (!branches.length) { const option = node('option', '', '暂无远程分支'); option.value = ''; options.unshift(option); }
     $('remote-branch').replaceChildren(...options); $('remote-branch').value = remoteBranch || '';
+    remoteBranchSelect.replaceChildren(...options.map(option => option.cloneNode(true))); remoteBranchSelect.value = remoteBranch || ''; remoteBranchSelect.disabled = !branches.length;
     $('remote-branch').disabled = !branches.length; $('remote-commit').disabled = !branches.length;
-    $('remote-commit').title = branches.length ? '在远程 ' + remoteBranch + ' 上追加一次提交，不切换本地分支' : '先推送一个分支到虚拟远程';
+    $('remote-commit').title = branches.length ? '打开远程 ' + remoteBranch + ' 的协作者编辑区' : '先推送一个分支到虚拟远程';
     $('remote-branch-hint').replaceChildren(document.createTextNode('只推进所选远程分支，不切换本地分支。'));
     if (localOnly.length) $('remote-branch-hint').append(document.createTextNode('先发布本地分支，例如：'), node('code', '', 'git push -u origin ' + localOnly[0]));
     $('remote-refs').replaceChildren();
@@ -151,6 +228,42 @@
   }
 
   function renderFiles() {
+    const remote = editorMode === 'remote';
+    localModeButton.setAttribute('aria-pressed', String(!remote)); remoteModeButton.setAttribute('aria-pressed', String(remote));
+    filePanel.classList.toggle('editing-remote', remote); remoteToolbar.hidden = !remote; remoteActions.hidden = !remote;
+    $('files-title').replaceChildren(node('span', 'section-dot green'), document.createTextNode(remote ? '文件与三个区域 · 模拟协作者' : '文件与三个区域 · 我的本地'));
+    document.querySelector('.work-area .area-heading > span').textContent = remote ? 'WORKTREE · 协作者编辑' : 'WORKTREE · 直接编辑';
+    document.querySelector('.index-area .area-heading > span').textContent = remote ? 'INDEX · 协作者暂存快照' : 'INDEX · git add 快照';
+    document.querySelector('.head-area .area-heading > span').textContent = remote ? '远程 ' + (remoteBranch || '') + ' · 已提交快照' : 'HEAD · 已提交快照';
+    document.querySelector('.index-area .area-footer').textContent = remote ? '相对远程当前提交：绿色为新增，红色为删除' : '相对 HEAD：绿色为新增，红色为删除';
+    document.querySelector('.head-area .area-footer').textContent = remote ? '协作者草稿基于的远程提交，不是你的本地 HEAD' : '最近一次 git commit 保存的内容';
+    if (!remote) { renderLocalFiles(); return; }
+    $('conflict-panel').hidden = true;
+    const session = remoteSession();
+    if (!session) { $('file-editor').value = ''; $('file-editor').disabled = true; submitRemote.disabled = true; remoteBase.textContent = '暂无远程分支，请先切回本地 push。'; return; }
+    const workspace = session.workspace, files = workspace.fileStatus(), paths = files.map(file => file.path);
+    if (!paths.includes(session.selectedFile)) session.selectedFile = paths[0] || '';
+    const path = session.selectedFile, status = files.find(file => file.path === path);
+    $('file-select').replaceChildren(...paths.map(path => { const option = node('option', '', path); option.value = path; return option; }));
+    $('file-select').value = path; $('file-select').disabled = !path;
+    const readFile = tree => Object.hasOwn(tree, path) ? tree[path] : undefined;
+    $('file-editor').value = session.dirty ? session.buffer : readFile(workspace.work) ?? '';
+    $('file-editor').disabled = !path; $('save-file').disabled = !path; $('delete-file').disabled = !Object.hasOwn(workspace.work, path);
+    renderCode($('head-file'), readFile(workspace.base)); renderCode($('index-file'), readFile(workspace.index), readFile(workspace.base), true);
+    renderCode($('work-diff'), session.dirty ? session.buffer : readFile(workspace.work), readFile(workspace.index), true);
+    $('file-state').replaceChildren(node('span', '', path || '暂无文件'));
+    if (status?.staged) $('file-state').append(node('span', 'state-tag', '协作者已暂存'));
+    if (session.dirty || status?.unstaged) $('file-state').append(node('span', 'state-tag dirty', session.dirty ? '协作者草稿未保存' : status.deleted ? '协作者工作区删除' : '协作者未暂存'));
+    else if (!status?.staged) $('file-state').append(node('span', 'state-tag', '协作者三个区域一致'));
+    $('editor-status').textContent = session.dirty ? '协作者草稿 · 暂存或提交前自动保存' : '编辑后保存到协作者工作区';
+    const stale = workspace.baseId !== sim.state.remote.branches[remoteBranch];
+    remoteBase.textContent = '草稿基于远程 ' + remoteBranch + ' · ' + workspace.baseId + (stale ? '。远程已更新，请“重新载入远程”；这会丢弃此分支草稿。' : '。各分支的草稿分别保留，重新载入会丢弃此分支草稿。');
+    remoteBase.classList.toggle('error', stale); stageRemoteFile.disabled = !path; stageRemoteAll.disabled = !files.length;
+    submitRemote.disabled = stale || !files.some(file => file.staged); submitRemote.textContent = '提交到远程 ' + remoteBranch;
+    remoteMessage.value = session.message; renderRecommendations(); renderLesson(); requestAnimationFrame(() => graph.resize());
+  }
+
+  function renderLocalFiles() {
     const files = sim.fileStatus(), paths = files.map(file => file.path);
     if (!paths.includes(selectedFile)) selectedFile = paths[0] || '';
     $('file-select').replaceChildren(...paths.map(path => { const option = node('option', '', path); option.value = path; return option; }));
@@ -191,6 +304,7 @@
   }
 
   function saveEditor(quiet = false) {
+    if (editorMode === 'remote') return saveRemoteEditor(quiet);
     try {
       if (!selectedFile) return false;
       sim.editFile(selectedFile, $('file-editor').value); dirty = false; renderFiles();
@@ -232,6 +346,7 @@
 
   function runCommand(event) {
     event.preventDefault(); cancelReplay();
+    if (editorMode !== 'local') switchEditorMode('local');
     if (dirty && !saveEditor(true)) return;
     const input = $('command').value.trim(); if (!input) return;
     history.push(input); historyIndex = history.length; draft = '';
@@ -410,14 +525,34 @@
     $('command').setSelectionRange($('command').value.length, $('command').value.length);
     assistant.refresh(false);
   });
-  $('file-editor').addEventListener('input', () => { dirty = true; $('editor-status').textContent = '编辑草稿 · 执行命令时自动保存'; renderRecommendations(); renderLesson(); });
+  $('file-editor').addEventListener('input', () => {
+    if (editorMode === 'remote') { const session = remoteSession(); if (session) { session.buffer = $('file-editor').value; session.dirty = true; $('editor-status').textContent = '协作者草稿 · 暂存或提交前自动保存'; } return; }
+    dirty = true; $('editor-status').textContent = '编辑草稿 · 执行命令时自动保存'; renderRecommendations(); renderLesson();
+  });
   $('save-file').addEventListener('click', () => saveEditor());
-  $('file-select').addEventListener('change', () => { const target = $('file-select').value; if (dirty && !saveEditor(true)) { $('file-select').value = selectedFile; return; } selectedFile = target; dirty = false; message(); renderFiles(); });
-  $('delete-file').addEventListener('click', () => { try { sim.deleteFile(selectedFile); dirty = false; renderFiles(); message('已从虚拟工作区删除。输入 git add 暂存这次删除。'); } catch (error) { message(error.message, true); } });
+  $('file-select').addEventListener('change', () => {
+    const target = $('file-select').value;
+    if (editorMode === 'remote') { const session = remoteSession(); if (session.dirty && !saveRemoteEditor(true)) { $('file-select').value = session.selectedFile; return; } session.selectedFile = target; session.dirty = false; renderFiles(); message(); return; }
+    if (dirty && !saveEditor(true)) { $('file-select').value = selectedFile; return; } selectedFile = target; dirty = false; message(); renderFiles();
+  });
+  $('delete-file').addEventListener('click', () => {
+    try {
+      if (editorMode === 'remote') { const session = remoteSession(); session.workspace.deleteFile(session.selectedFile); session.dirty = false; renderFiles(); message('已从协作者工作区删除，请暂存这次删除。'); return; }
+      sim.deleteFile(selectedFile); dirty = false; renderFiles(); message('已从虚拟工作区删除。输入 git add 暂存这次删除。');
+    } catch (error) { message(error.message, true); }
+  });
   $('new-file').addEventListener('click', () => { $('new-file-form').hidden = false; $('new-path').focus(); });
   $('cancel-new').addEventListener('click', () => { $('new-file-form').hidden = true; });
   $('new-file-form').addEventListener('submit', event => {
     event.preventDefault();
+    if (editorMode === 'remote') {
+      const session = remoteSession(); if (!session || (session.dirty && !saveRemoteEditor(true))) return;
+      const path = $('new-path').value.trim();
+      try {
+        if (session.workspace.fileStatus().some(file => file.path === path)) throw new Error('该文件已经存在，请从文件列表中选择。');
+        session.workspace.editFile(path, ''); session.selectedFile = path; session.dirty = false; $('new-file-form').hidden = true; $('new-path').value = ''; renderFiles(); message('已在协作者工作区创建文件。'); $('file-editor').focus();
+      } catch (error) { message(error.message, true); } return;
+    }
     if (dirty && !saveEditor(true)) return;
     const path = $('new-path').value.trim();
     try {
@@ -433,13 +568,9 @@
       dirty = false; renderFiles(); message('已选择此版本，请检查内容，再 git add 并继续。');
     });
   }
-  $('remote-branch').addEventListener('change', () => { remoteBranch = $('remote-branch').value; renderRemote(); });
+  $('remote-branch').addEventListener('change', () => { remoteBranch = $('remote-branch').value; renderRemote(); if (editorMode === 'remote') renderFiles(); });
   $('remote-commit').addEventListener('click', () => {
-    cancelReplay(); const before = sim.snapshot(), result = sim.simulateRemote(remoteBranch);
-    terminalEntry('☁ 虚拟协作者 · origin/' + remoteBranch, result.output, result); render(result.ok); updateExplanation(result, '远程 ' + (result.branch || remoteBranch) + ' 新增了一次提交');
-    if (!result.ok) return;
-    showCommit(sim.state.remote.commits[result.commitId], true);
-    lastResult = { ...result, before, after: sim.snapshot() }; $('replay').disabled = false;
+    switchEditorMode('remote'); filePanel.scrollIntoView({ block: 'start' }); $('file-editor').focus();
   });
   $('replay').addEventListener('click', replay); $('restart').addEventListener('click', () => loadScene(sim.scene));
   $('help-button').addEventListener('click', () => $('help-dialog').showModal()); $('close-help').addEventListener('click', () => $('help-dialog').close());

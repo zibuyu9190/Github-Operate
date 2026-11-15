@@ -107,6 +107,41 @@
     }
   }
 
+  /** 本地与协作者编辑遵守相同文本限制，换行统一后才写入各自的工作区。 */
+  function normalizeFileText(text) {
+    if (typeof text !== 'string' || text.includes('\0') || text.length > 20000 || lines(text).length > 300) throw new Error('教学文件仅支持普通文本，最多 300 行、20000 个字符。');
+    return text.replace(/\r\n/g, '\n');
+  }
+
+  /** 协作者的工作区和暂存区独立保存，不借用本地仓库的 HEAD、index 或 work。 */
+  class RemoteWorkspace {
+    constructor(branch, commit) {
+      this.branch = branch; this.baseId = commit.id; this.base = clone(commit.tree);
+      this.work = clone(commit.tree); this.index = clone(commit.tree);
+    }
+    editFile(path, text) {
+      validPath(path); const normalized = normalizeFileText(text);
+      if (keys(this.work, this.index).some(p => p !== path && (p.startsWith(path + '/') || path.startsWith(p + '/')))) throw new Error('文件路径与已有文件/目录冲突。');
+      this.work[path] = normalized;
+    }
+    deleteFile(path) {
+      validPath(path);
+      if (!own(this.work, path)) throw new Error('协作者工作区中没有这个文件。');
+      delete this.work[path];
+    }
+    stage(paths) {
+      const targets = paths === '.' ? keys(this.base, this.index, this.work) : paths;
+      if (!Array.isArray(targets) || targets.some(path => !keys(this.base, this.index, this.work).includes(path))) throw new Error('请选择存在的文件或待暂存的删除。');
+      for (const path of targets) put(this.index, path, value(this.work, path));
+    }
+    fileStatus() {
+      return keys(this.base, this.index, this.work).map(path => ({ path, staged: value(this.base, path) !== value(this.index, path), unstaged: value(this.index, path) !== value(this.work, path), deleted: !own(this.work, path) }));
+    }
+    isClean() { return same(this.base, this.index) && same(this.index, this.work); }
+    /** 提交仅接纳暂存快照，保留暂存之后再次编辑的工作区内容。 */
+    acceptCommit(commit) { this.baseId = commit.id; this.base = clone(commit.tree); this.index = clone(commit.tree); }
+  }
+
   /** 所有状态均为页面内的可序列化数据；提交快照创建后不再修改。 */
   class Simulator {
     constructor(scene = 'basic') { this.loadScene(scene); }
@@ -251,9 +286,9 @@
     /** 编辑只影响工作区，已暂存内容始终保持 add 时的快照。 */
     editFile(path, text) {
       validPath(path);
-      if (typeof text !== 'string' || text.includes('\0') || text.length > 20000 || lines(text).length > 300) throw new Error('教学文件仅支持普通文本，最多 300 行、20000 个字符。');
+      const normalized = normalizeFileText(text);
       if (keys(this.state.work, this.state.index).some(p => p !== path && (p.startsWith(path + '/') || path.startsWith(p + '/')))) throw new Error('文件路径与已有文件/目录冲突。');
-      this.state.work[path] = text.replace(/\r\n/g, '\n');
+      this.state.work[path] = normalized;
     }
 
     deleteFile(path) {
@@ -739,7 +774,26 @@
       return { output: source + ' → origin/' + destination + '：' + id, explanation: 'push 上传提交并移动远程分支，同时更新本地对应的远程跟踪引用。它不会自动合并远程分叉。' };
     }
 
-    /** 在指定的已有远程分支追加提交；省略时优先 main，本地 origin/* 必须等 fetch 后才会变化。 */
+    /** 协作者直接在远程创建提交；全部输入先校验，草稿过期时拒绝覆盖新的远程历史。 */
+    commitRemote(branch, draft) {
+      try {
+        if (typeof branch !== 'string' || !own(this.state.remote.branches, branch)) throw new Error('请选择一个已存在的远程分支；本地新分支需先 push。');
+        const old = this.state.remote.branches[branch];
+        if (!draft || draft.baseId !== old) throw new Error('远程分支已更新，请重新载入远程文件后再编辑和提交。');
+        if (typeof draft.message !== 'string' || !draft.message.trim() || draft.message.length > 200) throw new Error('请填写提交说明，最多 200 个字符。');
+        if (!draft.tree || typeof draft.tree !== 'object' || Array.isArray(draft.tree) || ![Object.prototype, null].includes(Object.getPrototypeOf(draft.tree))) throw new Error('文件快照格式无效。');
+        const tree = {};
+        for (const [path, text] of Object.entries(draft.tree)) { validPath(path); tree[path] = normalizeFileText(text); }
+        checkTreePaths(tree);
+        const previous = this.state.remote.commits[old].tree;
+        if (same(previous, tree)) throw new Error('暂存区没有可提交的变化，请先编辑并暂存文件。');
+        const message = draft.message.trim(), id = this.newCommit(tree, [old], message, true);
+        this.state.remote.branches[branch] = id;
+        return { ok: true, commitId: id, branch, output: '虚拟远程 ' + branch + ' 新增 ' + id + '\n提交说明：' + message + '\n本次文件变更：\n' + treeDiff(previous, tree), explanation: '协作者已提交到远程 ' + branch + '。你的本地分支、文件、暂存区和 origin/' + branch + ' 尚未变化；fetch 下载更新，pull 再整合到本地。' };
+      } catch (error) { return { ok: false, output: error.message, explanation: '远程提交未创建，仓库与协作者草稿保持不变。' }; }
+    }
+
+    /** 场景预置和快捷示例仍可自动追加一行；自由编辑通过 commitRemote 提交完整暂存快照。 */
     simulateRemote(branch) {
       if (branch === undefined) branch = own(this.state.remote.branches, 'main') ? 'main' : Object.keys(this.state.remote.branches)[0];
       // 不把本地分支或跟踪引用误当作远程实际分支，校验失败时不创建对象或消耗提交编号。
@@ -803,7 +857,7 @@
     reset: { title: 'Reset 对比', subtitle: '同样退一步，三个区域各不相同。', hint: '已有三次提交。分别重置场景，试试 soft、mixed、hard。', commands: ['git reset --soft HEAD~1', 'git reset --mixed HEAD~1', 'git reset --hard HEAD~1', 'git revert HEAD'] },
     remote: { title: '远程协作', subtitle: '看清本地、远程与中间的那条线。', hint: '本地和远程各有一个新提交。先 push 看拒绝原因，再 fetch、pull、push。', commands: ['git push', 'git fetch', 'git pull --no-rebase origin main', 'git push'] }
   };
-  const api = { Simulator, SCENES, mergeText, edits, same };
+  const api = { Simulator, RemoteWorkspace, SCENES, mergeText, edits, same };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.GitSimulator = api;
 })(globalThis);

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { Simulator } = require('../simulator.js');
+const { Simulator, RemoteWorkspace } = require('../simulator.js');
 
 // 所有真实 Git 操作仅限仓库 target/ 下的独立临时目录，不访问真实远程或开发仓库。
 const outputRoot = path.resolve(__dirname, '../../target/webui-validation');
@@ -223,6 +223,22 @@ test('真实 Git 对照：协作者只推进远程 dev，fetch 与 pull 不误�
   f.command('switch', 'dev'); f.command('pull', '--no-rebase', 'origin', 'dev'); f.assertState();
   assert.equal(f.git(['rev-parse', 'main'], false, remotePath).stdout.trim(), main);
   assert.equal(f.sim.state.branches.main, local.branches.main);
+});
+
+test('真实 Git 对照：协作者自由编辑多个文件，本地 fetch 后 pull 冲突并解决', t => {
+  const f = fixture(t), remotePath = path.resolve(f.directory, '../remote.git'), collaborator = path.resolve(f.directory, '../collaborator');
+  f.git(['init', '--bare', '-b', 'main', remotePath]); f.git(['remote', 'add', 'origin', remotePath]); f.command('push', '-u', 'origin', 'main'); f.git(['clone', remotePath, collaborator]);
+  const draft = new RemoteWorkspace('main', f.sim.state.remote.commits[f.sim.state.remote.branches.main]);
+  draft.editFile('hello.txt', draft.work['hello.txt'].replace('你好，Git！', '协作者的新问候'));
+  draft.deleteFile('README.md'); draft.editFile('collaborator.txt', '协作者自定义的文件\n'); draft.stage('.');
+  for (const [file, text] of Object.entries(draft.work)) fs.writeFileSync(path.join(collaborator, file), text, 'utf8');
+  fs.unlinkSync(path.join(collaborator, 'README.md'));
+  f.git(['add', '.'], false, collaborator); f.git(['commit', '-m', '调整问候并更新协作文件'], false, collaborator); f.git(['push', 'origin', 'main'], false, collaborator);
+  assert.equal(f.sim.commitRemote('main', { baseId: draft.baseId, tree: draft.index, message: '调整问候并更新协作文件' }).ok, true);
+  f.edit('hello.txt', f.sim.state.work['hello.txt'].replace('你好，Git！', '本地的新问候')); f.commit('本地修改问候');
+  f.command('fetch'); f.assertState(); assert.equal(f.command('pull', '--no-rebase', 'origin', 'main').conflict, true);
+  f.edit('hello.txt', '统一问候\n'); f.command('add', '.'); f.command('merge', '--continue'); f.assertState();
+  assert.equal(f.sim.state.work['README.md'], undefined); assert.equal(f.sim.state.work['collaborator.txt'], '协作者自定义的文件\n');
 });
 
 test('真实 Git 对照：cherry-pick 只摘取指定补丁，多提交顺序一致', t => {
