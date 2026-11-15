@@ -135,7 +135,11 @@ test('六场景及变基、远程合并后：每条边仍指向真实父提交�
       const point = layout.positions.get(commit.id), to = layout.positions.get(parent);
       assert.ok(to.y < point.y, scene + ': parent above child');
       const values = edges[index++].attrs.d.match(/-?\d+(?:\.\d+)?/g).map(Number);
-      assert.equal(values[0], point.x); assert.equal(values[values.length - 2], to.x);
+      // 多条边分别连接圆周上的独立入口，同时校验确实落在对应子、父节点旁。
+      const radius = Number(view.all().find(e => e.tag === 'circle').attrs.r);
+      assert.ok(Math.abs(Math.hypot(values[0] - point.x, values[1] - point.y) - (radius + 1)) < .001);
+      assert.ok(Math.abs(Math.hypot(values.at(-2) - to.x, values.at(-1) - to.y) - (radius + 6)) < .001);
+      assert.ok(values[1] < point.y && values.at(-1) > to.y);
       assert.equal(edges[index - 1].attrs['marker-end'], 'url(#parent-arrow)');
     }
     assert.equal(edges.length, index);
@@ -222,4 +226,71 @@ test('六类场景和跨层合并：长名称、多层标签及 HEAD 说明均�
   run(sim, 'git branch very-long-branch-name-for-label-clearance');
   run(sim, 'git switch main'); run(sim, 'git merge dev');
   assertLabelsClear(view, sim.state);
+});
+
+/** 按截图构造不等长分支；镜像历史确保绕行策略不偏向固定一侧。 */
+function unevenMerge(longOnLeft) {
+  const sim = new Simulator('basic');
+  run(sim, 'git switch -c ' + (longOnLeft ? 'dev' : 'topic'));
+  commitFile(sim, longOnLeft ? 'dev.txt' : 'topic.txt', '1\n');
+  run(sim, 'git switch main'); run(sim, 'git switch -c ' + (longOnLeft ? 'topic' : 'dev'));
+  commitFile(sim, longOnLeft ? 'topic.txt' : 'dev.txt', '1\n');
+  if (longOnLeft) run(sim, 'git switch dev');
+  commitFile(sim, 'dev.txt', '2\n'); run(sim, 'git push -u origin dev');
+  run(sim, 'git merge topic'); run(sim, 'git branch -d topic');
+  return sim;
+}
+
+function sampledLength(segments) { return segments.reduce((sum, [a, b]) => sum + Math.hypot(b[0] - a[0], b[1] - a[1]), 0); }
+
+/** 独立检测实际路径的相交与贴线，不读取布局器的候选路径或评分。 */
+function segmentsMeet([a, b], [c, d]) {
+  const cross = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  const epsilon = .00001;
+  if (Math.max(a[0], b[0]) + epsilon < Math.min(c[0], d[0]) || Math.max(c[0], d[0]) + epsilon < Math.min(a[0], b[0]) || Math.max(a[1], b[1]) + epsilon < Math.min(c[1], d[1]) || Math.max(c[1], d[1]) + epsilon < Math.min(a[1], b[1])) return false;
+  return cross(a, b, c) * cross(a, b, d) <= epsilon && cross(c, d, a) * cross(c, d, b) <= epsilon;
+}
+
+for (const left of [false, true]) test('截图中的不等长分支合并与镜像：连线走内部短路径，无交叉或共享线段，左侧长链=' + left, () => {
+  const sim = unevenMerge(left), view = renderer(false), before = sim.snapshot();
+  const layout = view.graph.layout(sim.state), merge = layout.objects[sim.headId()];
+  const route = layout.edges.find(edge => edge.commit === merge.id && edge.parent === merge.parents[1]);
+  const segments = pathSegments(route.path), child = layout.positions.get(merge.id), parent = layout.positions.get(merge.parents[1]);
+  const xMin = Math.min(child.x, parent.x) - 12, xMax = Math.max(child.x, parent.x) + 12;
+  assert.ok(segments.every(segment => segment.every(([x]) => x >= xMin && x <= xMax)), '跨层线应留在两个端点之间，避免绕到画布边缘');
+  assert.ok(sampledLength(segments) < child.y - parent.y + Math.abs(child.x - parent.x) + 60, '跨层线长度应接近必要的横纵距离');
+  const routes = layout.edges.map(edge => ({ edge, segments: pathSegments(edge.path) }));
+  for (let i = 0; i < routes.length; i++) for (let j = i + 1; j < routes.length; j++) {
+    assert.ok(!routes[i].segments.some(a => routes[j].segments.some(b => segmentsMeet(a, b))), `${routes[i].edge.commit}→${routes[i].edge.parent} 与 ${routes[j].edge.commit}→${routes[j].edge.parent} 不应交叉或贴合`);
+  }
+  assertLabelsClear(view, sim.state);
+  assert.deepEqual(sim.snapshot(), before);
+});
+
+test('同一父提交的多条入线和合并提交的出线分别连接独立圆周入口', () => {
+  const view = renderer(false), sim = unevenMerge(false), layout = view.graph.layout(sim.state);
+  for (const [field, end] of [['parent', true], ['commit', false]]) {
+    const groups = new Map();
+    for (const edge of layout.edges) {
+      const segments = pathSegments(edge.path), point = end ? segments.at(-1)[1] : segments[0][0];
+      if (!groups.has(edge[field])) groups.set(edge[field], []); groups.get(edge[field]).push(point);
+    }
+    for (const points of groups.values()) for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) assert.ok(Math.hypot(points[i][0] - points[j][0], points[i][1] - points[j][1]) >= 12);
+  }
+});
+
+test('跨层合并绕开中间节点、长分支标签和 HEAD 说明，重复绘制路径稳定', () => {
+  const sim = new Simulator('basic'), view = renderer(false);
+  run(sim, 'git branch topic');
+  for (let i = 0; i < 5; i++) commitFile(sim, 'main.txt', String(i));
+  run(sim, 'git switch topic'); commitFile(sim, 'topic.txt', 'topic');
+  for (let i = 0; i < 5; i++) run(sim, 'git branch long-feature-label-for-routing-' + i);
+  run(sim, 'git switch main'); run(sim, 'git merge topic');
+  assertLabelsClear(view, sim.state);
+  const layout = view.graph.layout(sim.state), radius = Number(view.all().find(e => e.tag === 'circle').attrs.r);
+  for (const edge of layout.edges) for (const [id, point] of layout.positions) {
+    if (id === edge.commit || id === edge.parent) continue;
+    assert.equal(pathSegments(edge.path).some(segment => crossesBox(segment, { x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2 })), false, edge.commit + '→' + edge.parent + ' 不应穿过 ' + id);
+  }
+  assert.deepEqual(view.graph.layout(sim.state).edges, layout.edges);
 });
