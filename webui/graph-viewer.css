@@ -83,16 +83,35 @@ body.repository-browser-open { overflow: hidden !important; }
 .repo-path-separator { color: #8c959f; }
 .repo-current-path { font-weight: 600; overflow-wrap: anywhere; }
 .repo-file-list, .repo-file-card, .repo-readme { border: 1px solid #d1d9e0; border-radius: 6px; overflow: hidden; }
-.repo-list-heading, .repo-file-row { display: grid; grid-template-columns: minmax(0, 1fr) 100px 90px; gap: 16px; align-items: center; }
+.repo-list-heading, .repo-file-row { display: grid; grid-template-columns: minmax(130px, .85fr) minmax(0, 1.4fr) 95px 65px; gap: 20px; align-items: center; }
 .repo-list-heading { padding: 10px 16px; background: #f6f8fa; color: #59636e; font-size: 12px; }
 .repo-file-row { width: 100%; padding: 12px 16px; border: 0; border-top: 1px solid #d8dee4; background: #fff; color: #1f2328; font: inherit; text-align: left; }
 .repo-file-row:hover, .repo-parent:hover { background: #f6f8fa; }
-.repo-entry-name { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.repo-entry-name { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 0; border: 0; background: transparent; color: #1f2328; font: inherit; text-align: left; cursor: pointer; }
+.repo-entry-name:hover { color: #0969da; text-decoration: underline; }
 .repo-entry-name > span:last-child { overflow-wrap: anywhere; }
 .repo-folder-icon { flex: none; color: #54aeff; }
 .repo-file-icon { flex: none; color: #6e7781; }
 .repo-entry-size, .repo-entry-type { color: #59636e; font-size: 12px; }
 .repo-entry-size, .repo-list-heading > span:last-child { text-align: right; }
+/* 文件入口和提交入口分别使用按钮，避免嵌套交互元素；说明截断后可悬停查看全文。 */
+.repo-commit-link { display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 100%; padding: 2px 0; border: 0; background: transparent; color: #59636e; font: inherit; text-align: left; cursor: pointer; }
+.repo-commit-message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.repo-commit-link:hover .repo-commit-message { color: #0969da; text-decoration: underline; }
+.repo-commit-id { flex: none; color: #6e7781; font: 11px var(--mono, monospace); }
+.repo-entry-time { flex: none; color: #59636e; font-size: 12px; white-space: nowrap; }
+.repo-history-missing { color: #8c959f; font-size: 12px; }
+.repo-latest > .repo-commit-link { flex: 1; }
+.repo-file-history { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #d1d9e0; background: #fff; }
+.repo-file-history > span { flex: none; color: #6e7781; font-size: 12px; }
+.repo-file-history .repo-commit-link { flex: 1; }
+.repo-commit-details { margin: 0 0 18px; border: 1px solid #d1d9e0; border-radius: 6px; overflow: hidden; }
+.repo-commit-details[hidden] { display: none; }
+.repo-commit-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #d1d9e0; background: #f6f8fa; }
+.repo-commit-header h3 { margin: 3px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.repo-commit-body { padding: 4px 16px 16px; font-size: 12px; line-height: 1.7; }
+.repo-commit-body pre { overflow: auto; max-height: 350px; }
+.repo-commit-body .commit-full-snapshot pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .repo-parent { width: 100%; padding: 10px 16px; border: 0; border-top: 1px solid #d8dee4; background: #fff; text-align: left; color: #0969da; font: inherit; }
 .repo-readme { margin-top: 18px; }
 .repo-readme h3 { margin: 0; padding: 12px 16px; border-bottom: 1px solid #d1d9e0; font-size: 13px; }
@@ -132,8 +151,16 @@ body.repository-browser-open { overflow: hidden !important; }
   .repository-browser .repo-hint { padding: 4px 14px 12px; }
   .repo-notice { margin: 0 14px 10px; }
   .repo-body { padding: 0 14px 14px; }
-  .repo-list-heading, .repo-file-row { grid-template-columns: minmax(0, 1fr) 60px; gap: 8px; padding-left: 12px; padding-right: 12px; }
-  .repo-entry-type, .repo-list-heading > span:nth-child(2) { display: none; }
+  /* 窄屏仍显示逐文件提交信息，第二行完整换行，右侧保留时间。 */
+  .repo-list-heading, .repo-file-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding-left: 12px; padding-right: 12px; }
+  .repo-list-heading > span:nth-child(2), .repo-list-heading > span:last-child, .repo-entry-size { display: none; }
+  .repo-file-row > .repo-commit-link, .repo-file-row > .repo-history-missing { grid-column: 1 / -1; grid-row: 2; }
+  .repo-file-row > .repo-entry-time { grid-column: 2; grid-row: 1; }
+  .repo-file-row .repo-commit-message { white-space: normal; overflow-wrap: anywhere; }
+  .repo-latest { gap: 8px; padding: 10px 12px; }
+  .repo-file-history { flex-wrap: wrap; padding: 10px 12px; }
+  .repo-file-history .repo-commit-link { flex-basis: calc(100% - 80px); }
+  .repo-commit-header { flex-wrap: wrap; }
   .repo-line-number { width: 40px; padding-right: 10px; }
   .repo-file-header { padding: 10px 12px; }
 }

@@ -267,7 +267,8 @@
 
     newCommit(tree, parents, message, remoteOnly = false) {
       const order = this.state.nextId++, id = 'C' + order;
-      const commit = { id, hash: (order + 1).toString(16).padStart(7, '0'), parents: [...parents], tree: clone(tree), message, order };
+      // 记录本次页面会话的实际创建时间，仓库浏览不以提交顺序伪造相对时间。
+      const commit = { id, hash: (order + 1).toString(16).padStart(7, '0'), parents: [...parents], tree: clone(tree), message, order, timestamp: Date.now() };
       (remoteOnly ? this.state.remote.commits : this.state.commits)[id] = commit;
       return id;
     }

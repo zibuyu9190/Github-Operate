@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { Simulator } = require('../simulator.js');
-const { Model, View, listEntries, fileStats } = require('../graph-viewer.js').RepositoryBrowser;
+const { Simulator, edits } = require('../simulator.js');
+const { Model, View, listEntries, fileStats, latestPathCommit, commitAge } = require('../graph-viewer.js').RepositoryBrowser;
 
 function run(sim, command) { const result = sim.execute(command); assert.equal(result.ok, true, result.output); return result; }
 function commit(sim, file, content) { sim.editFile(file, content); run(sim, 'git add .'); run(sim, 'git commit -m "更新 ' + file + '"'); }
@@ -105,7 +105,11 @@ function fixture() {
   const sim = new Simulator(); let prepares = 0;
   const previous = global.document; global.document = document;
   let view; try { view = new View(() => ({ state: sim.state }), () => prepares++); } finally { global.document = previous; }
-  const withDocument = action => { const previous = global.document; global.document = document; try { return action(); } finally { global.document = previous; } };
+  const withDocument = action => {
+    const previous = global.document, oldSimulator = global.GitSimulator;
+    global.document = document; global.GitSimulator = { edits };
+    try { return action(); } finally { global.document = previous; global.GitSimulator = oldSimulator; }
+  };
   return { sim, view, all: () => all(view.dialog), document, editor, prepares: () => prepares, withDocument };
 }
 
@@ -155,4 +159,115 @@ test('关闭事件延迟到弹窗重开后派发时，仍锁定背景并保留�
     assert.equal(f.document.body.classes.has('repository-browser-open'), false);
     assert.equal(f.document.activeElement, f.view.trigger);
   });
+});
+
+test('逐文件提交沿所选分支追溯，文件夹汇总内部变更，不混入其他分支或相邻目录', () => {
+  const sim = new Simulator(), model = new Model();
+  commit(sim, 'src/a.txt', '第一份\n'); const first = sim.headId();
+  commit(sim, 'src/deep/b.txt', '第二份\n'); const second = sim.headId();
+  commit(sim, 'src-old/other.txt', '相邻路径\n');
+  run(sim, 'git branch dev'); run(sim, 'git switch -c other'); commit(sim, 'src/a.txt', '另一分支\n');
+  model.selectSource('local', sim.state); model.selectReference('branch:dev', sim.state);
+  let snapshot = model.read(sim.state);
+  assert.equal(snapshot.entries.find(entry => entry.path === 'src').lastCommit.id, second);
+  assert.equal(snapshot.entries.find(entry => entry.path === 'hello.txt').lastCommit.id, 'C0');
+  model.openPath('src', sim.state); snapshot = model.read(sim.state);
+  assert.equal(snapshot.entries.find(entry => entry.path === 'src/a.txt').lastCommit.id, first);
+  assert.equal(snapshot.entries.find(entry => entry.path === 'src/deep').lastCommit.id, second);
+  model.openPath('src/a.txt', sim.state); assert.equal(model.read(sim.state).fileCommit.id, first);
+});
+
+test('合并沿内容相同的父提交找到文件来源，文件夹的合并结果和冲突解决归于合并提交', () => {
+  const sim = new Simulator();
+  run(sim, 'git branch feature'); commit(sim, 'src/local.txt', '本地\n'); const local = sim.headId();
+  run(sim, 'git switch feature'); commit(sim, 'src/remote.txt', '分支\n'); const feature = sim.headId();
+  run(sim, 'git switch main'); run(sim, 'git merge feature'); const merged = sim.headId();
+  assert.equal(latestPathCommit(sim.state.commits, merged, 'src/local.txt').id, local);
+  assert.equal(latestPathCommit(sim.state.commits, merged, 'src/remote.txt').id, feature);
+  assert.equal(latestPathCommit(sim.state.commits, merged, 'src', true).id, merged);
+  assert.equal(latestPathCommit(sim.state.commits, merged, 'hello.txt').id, 'C0');
+  const conflict = new Simulator('conflict'); run(conflict, 'git merge bugFix');
+  conflict.editFile('hello.txt', '保留双方并调整问候\n'); run(conflict, 'git add hello.txt'); run(conflict, 'git merge --continue');
+  assert.equal(latestPathCommit(conflict.state.commits, conflict.headId(), 'hello.txt').id, conflict.headId());
+});
+
+test('没有文件变化的 no-ff 合并不覆盖原说明，删除重建、改名和空文件记录真实最近提交', () => {
+  const sim = new Simulator(); run(sim, 'git switch -c feature');
+  commit(sim, 'empty.txt', ''); const created = sim.headId();
+  run(sim, 'git switch main'); run(sim, 'git merge --no-ff feature');
+  assert.equal(latestPathCommit(sim.state.commits, sim.headId(), 'empty.txt').id, created);
+  run(sim, 'git rm empty.txt'); run(sim, 'git commit -m "删除空文件"');
+  commit(sim, 'empty.txt', ''); const recreated = sim.headId();
+  assert.equal(latestPathCommit(sim.state.commits, recreated, 'empty.txt').id, recreated);
+  run(sim, 'git mv empty.txt renamed.txt'); run(sim, 'git commit -m "重命名空文件"');
+  assert.equal(latestPathCommit(sim.state.commits, sim.headId(), 'renamed.txt').id, sim.headId());
+});
+
+test('本地、远程和跟踪的文件提交说明各自更新，fetch 与 push 保留提交时间', () => {
+  const sim = new Simulator(), model = new Model();
+  const earliest = Date.now(); commit(sim, 'hello.txt', '本地文件\n'); const local = sim.headId(), timestamp = sim.state.commits[local].timestamp;
+  assert.ok(timestamp >= earliest && timestamp <= Date.now());
+  assert.equal(model.read(sim.state).entries.find(entry => entry.path === 'hello.txt').lastCommit.id, 'C0');
+  run(sim, 'git push');
+  assert.equal(sim.state.remote.commits[local].timestamp, timestamp);
+  const result = sim.commitRemote('main', { baseId: local, tree: { ...sim.headTree(), 'hello.txt': '协作者内容\n' }, message: '远端更新说明' });
+  assert.equal(result.ok, true); const remote = sim.state.remote.branches.main;
+  assert.equal(model.read(sim.state).entries.find(entry => entry.path === 'hello.txt').lastCommit.id, remote);
+  model.selectSource('tracking', sim.state);
+  assert.equal(model.read(sim.state).entries.find(entry => entry.path === 'hello.txt').lastCommit.id, local);
+  run(sim, 'git fetch');
+  assert.equal(model.read(sim.state).entries.find(entry => entry.path === 'hello.txt').lastCommit.id, remote);
+  assert.equal(sim.state.commits[remote].timestamp, sim.state.remote.commits[remote].timestamp);
+  model.selectSource('local', sim.state);
+  assert.equal(model.read(sim.state).entries.find(entry => entry.path === 'hello.txt').lastCommit.id, local);
+});
+
+test('历史缺失与异常环不借用另一来源对象，普通原型同名文件也按快照比较', () => {
+  const sim = new Simulator(), model = new Model(); commit(sim, 'new.txt', '内容\n'); run(sim, 'git push');
+  const id = sim.headId(); delete sim.state.commits.C0;
+  model.selectSource('tracking', sim.state);
+  assert.equal(model.read(sim.state).entries.find(entry => entry.path === 'hello.txt').lastCommit, null);
+  model.selectSource('remote', sim.state);
+  assert.equal(model.read(sim.state).entries.find(entry => entry.path === 'hello.txt').lastCommit.id, 'C0');
+  const commits = { A: { id: 'A', parents: ['B'], tree: { 'toString': '' } }, B: { id: 'B', parents: ['A'], tree: { 'toString': '' } } };
+  assert.equal(latestPathCommit(commits, 'A', 'toString'), null);
+  assert.equal(latestPathCommit({}, id, 'new.txt'), null);
+  commits.B.parents = []; commits.B.tree = {};
+  assert.equal(latestPathCommit(commits, 'A', 'toString').id, 'A');
+});
+
+test('相对时间按真实时刻计算，不用提交序号伪造日期，旧数据明确无时间', () => {
+  const now = 1800000000000;
+  assert.equal(commitAge(now, now), '刚刚');
+  assert.equal(commitAge(now - 59999, now), '刚刚');
+  assert.equal(commitAge(now - 120000, now), '2 分钟前');
+  assert.equal(commitAge(now - 7200000, now), '2 小时前');
+  assert.equal(commitAge(now - 172800000, now), '2 天前');
+  for (const missing of [undefined, null, NaN, Infinity, 0, 1e20]) assert.equal(commitAge(missing, now), '时间未记录');
+});
+
+test('文件行的提交说明独立可点击，详情使用纯文本且收起恢复焦点，不改变仓库', () => {
+  const f = fixture(), message = '<img src=x onerror=alert(1)>', text = '<script>alert(1)</script>\n';
+  f.sim.editFile('src/new.txt', text); run(f.sim, 'git add .'); run(f.sim, 'git commit -m "' + message + '"'); const id = f.sim.headId();
+  commit(f.sim, 'README.md', '另一个较新提交\n'); run(f.sim, 'git push'); const before = f.sim.snapshot();
+  f.withDocument(() => {
+    f.view.open();
+    const row = f.all().find(element => element.className === 'repo-file-row' && element.children[0].attributes['aria-label'] === '打开目录 src');
+    const link = row.children.find(element => element.className === 'repo-commit-link');
+    assert.equal(link.children[0].textContent, message); assert.equal(link.children[1].textContent, id);
+    assert.equal(row.tagName, 'div'); assert.equal(row.children[0].tagName, 'button');
+    assert.ok(f.all().every(element => element.tagName !== 'button' || element.children.every(child => child.tagName !== 'button')));
+    link.fire('click'); assert.equal(f.view.commitDetails.hidden, false); assert.equal(f.document.activeElement, f.view.commitDetails);
+    assert.match(f.view.commitDetailTitle.textContent, /<img/);
+    assert.ok(f.all().some(element => element.className?.includes('commit-diff-added') && element.textContent.includes('<script>')));
+    assert.equal(f.all().filter(element => ['img', 'script'].includes(element.tagName)).length, 0);
+    const close = f.all().find(element => element.tagName === 'button' && element.textContent === '收起提交详情');
+    close.fire('click'); assert.equal(f.view.commitDetails.hidden, true); assert.equal(f.document.activeElement, link);
+    row.children[0].fire('click');
+    f.all().find(element => element.attributes['aria-label'] === '查看文件 new.txt').fire('click');
+    assert.ok(f.all().some(element => element.className === 'repo-file-history'));
+    assert.equal(f.view.model.file, 'src/new.txt');
+    f.view.sourceSelect.value = 'tracking'; f.view.sourceSelect.fire('change'); assert.equal(f.view.commitDetails.hidden, true);
+  });
+  assert.deepEqual(f.sim.snapshot(), before);
 });

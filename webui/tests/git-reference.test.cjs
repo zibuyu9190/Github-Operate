@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { Simulator, RemoteWorkspace } = require('../simulator.js');
+const { latestPathCommit } = require('../graph-viewer.js').RepositoryBrowser;
 
 // 所有真实 Git 操作仅限仓库 target/ 下的独立临时目录，不访问真实远程或开发仓库。
 const outputRoot = path.resolve(__dirname, '../../target/webui-validation');
@@ -79,6 +80,25 @@ function fixture(t) {
   const commit = message => { command('add', '.'); command('commit', '-m', message); };
   return { directory, sim, git, edit, remove, command, commit, assertState };
 }
+
+test('真实 Git 对照：逐文件及目录的最近提交在分叉、合并、删除与重建后保持准确', t => {
+  const f = fixture(t);
+  const check = paths => {
+    for (const [file, directory = false] of paths) {
+      const commit = latestPathCommit(f.sim.state.commits, f.sim.headId(), file, directory);
+      assert.equal(commit.message, f.git(['log', '-1', '--format=%s', 'HEAD', '--', file]).stdout.trim(), '最近提交：' + file);
+    }
+  };
+  f.command('branch', 'feature');
+  f.edit('src/local.txt', '本地文件\n'); f.commit('新增本地文件');
+  check([['src', true], ['src/local.txt'], ['hello.txt']]);
+  f.command('switch', 'feature'); f.edit('src/remote.txt', '分支文件\n'); f.commit('新增分支文件');
+  f.command('switch', 'main'); f.command('merge', 'feature');
+  check([['src', true], ['src/local.txt'], ['src/remote.txt'], ['hello.txt']]);
+  f.remove('src/local.txt'); f.commit('删除本地文件'); check([['src', true], ['src/remote.txt']]);
+  f.edit('src/local.txt', '重新创建\n'); f.commit('重新创建文件'); check([['src', true], ['src/local.txt']]);
+  f.assertState();
+});
 
 test('真实 Git 对照：restore 的暂存/工作区恢复、新增文件取消暂存和删除恢复', t => {
   const f = fixture(t);
