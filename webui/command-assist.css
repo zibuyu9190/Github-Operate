@@ -1,5 +1,19 @@
 /* 独立扩展样式，沿用当前工作台和旧版离线页面的布局。 */
 #command-form { position: relative; }
+/* 身份与命令目标同时使用文字和按下状态，窄屏允许分行。 */
+.terminal-context { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 7px 10px; padding: 10px 14px; background: #172236; color: #cbd5e1; border-bottom: 1px solid #334155; }
+.command-panel.has-terminal-context { overflow-y: auto; }
+.has-terminal-context .terminal { flex: 1 0 150px; min-height: 150px; }
+.terminal-modes { display: flex; gap: 4px; padding: 3px; border: 1px solid #475569; border-radius: 7px; }
+.terminal-modes button { border: 1px solid transparent; border-radius: 4px; background: transparent; color: #cbd5e1; padding: 4px 9px; font: inherit; font-size: 11px; cursor: pointer; }
+.terminal-modes button[aria-pressed="true"] { color: #d1fae5; background: #065f46; border-color: #10b981; }
+.terminal-context.is-remote .terminal-modes button[aria-pressed="true"] { color: #ede9fe; background: #5b21b6; border-color: #a78bfa; }
+.terminal-modes button:focus-visible, .terminal-branch select:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+.terminal-branch { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 10px; }
+.terminal-branch select { min-width: 70px; max-width: 150px; padding: 4px; border: 1px solid #64748b; border-radius: 4px; background: #0f172a; color: #f1f5f9; }
+.terminal-scope { flex-basis: 100%; margin: 0; color: #a7f3d0; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.terminal-context.is-remote .terminal-scope { color: #ddd6fe; }
+.terminal-branch[hidden] { display: none; }
 .command-completions {
   position: absolute; z-index: 30; bottom: calc(100% - 2px); left: 10px; right: 10px;
   max-height: min(280px, 44vh); overflow: auto; padding: 5px;

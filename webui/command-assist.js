@@ -78,10 +78,13 @@
     const at = contextAt(input, Math.max(0, Math.min(input.length, caret)));
     if (!at) return [];
     const { active, prefix, before } = at, state = context.state;
+    const remote = context.mode === 'remote', supported = ['status', 'log', 'show', 'diff', 'add', 'restore', 'commit'];
+    if (remote && before.length && !supported.includes(before[0])) return [];
+    if (remote && before[0] === 'commit' && before.includes('--amend')) return [];
     let choices = [];
     const offer = (text, description, kind = '参数', edit = null) => choices.push({ text, description, kind, edit });
     const refs = (branchesOnly = false) => {
-      for (const name of Object.keys(state.branches)) offer(name, name === state.head.branch ? '当前本地分支' : '本地分支', '分支');
+      for (const name of Object.keys(state.branches)) offer(name, remote ? '协作者远程分支' : name === state.head.branch ? '当前本地分支' : '本地分支', '分支');
       if (branchesOnly) return;
       for (const name of Object.keys(state.tracking)) offer('origin/' + name, '本地远程跟踪引用', '引用');
       for (const name of Object.keys(state.tags || {})) offer(name, '本地版本标签', '标签');
@@ -107,7 +110,7 @@
     };
     if (!before.length) {
       if (prefix && 'git'.startsWith(prefix)) offer('git', '添加 Git 命令前缀', '命令');
-      for (const [name, [description]] of Object.entries(catalog)) offer(name, description, '命令');
+      for (const [name, [description]] of Object.entries(catalog)) if (!remote || supported.includes(name)) offer(name, description, '命令');
     } else {
       const [name, ...args] = before, positional = args.filter(x => !x.startsWith('-'));
       const options = (items) => { for (const [flag, description] of items) if (!args.includes(flag)) offer(flag, description); };
@@ -149,7 +152,7 @@
         }
         case 'commit':
           if (args.at(-1) === '-m' || args.at(-1) === '-am') { if (!prefix) offer('', '在引号内填写提交说明', '说明', 'message'); }
-          else { if (!args.includes('-m') && !args.includes('--no-edit') && !args.includes('-am')) offer('-m', '填写提交说明'); if (!args.includes('-a') && !args.includes('-am')) offer('-a', '自动暂存已跟踪文件，不包含未跟踪文件'); if (!args.includes('--amend')) offer('--amend', '用新提交替换最近提交的位置'); else if (!args.includes('-m')) offer('--no-edit', '沿用原提交说明'); }
+          else { if (!args.includes('-m') && !args.includes('--no-edit') && !args.includes('-am')) offer('-m', '填写提交说明'); if (!args.includes('-a') && !args.includes('-am')) offer('-a', '自动暂存已跟踪文件，不包含未跟踪文件'); if (!remote) { if (!args.includes('--amend')) offer('--amend', '用新提交替换最近提交的位置'); else if (!args.includes('-m')) offer('--no-edit', '沿用原提交说明'); } }
           break;
         case 'branch':
           if (!args.length) { offer('-d', '仅删除已合入的非当前分支'); offer('-m', '修改本地分支名称'); options([['-a', '列出本地与远程跟踪分支'], ['-vv', '查看上游与领先/落后关系']]); newBranch(); }
@@ -212,10 +215,14 @@
     });
   }
 
-  function usage(input) {
+  function usage(input, context = {}) {
     const parts = tokens(input.trim());
     if (!parts) return '一次输入一条 Git 命令';
     const name = parts[0]?.value === 'git' ? parts[1]?.value : parts[0]?.value;
+    if (context.mode === 'remote') {
+      if (name === 'commit') return '协作者用法：git commit [-a] -m "说明" · 直接提交到虚拟远程';
+      if (!['status', 'log', 'show', 'diff', 'add', 'restore'].includes(name)) return '协作者支持 status / log / show / diff / add / restore / commit；commit 直接提交到虚拟远程';
+    }
     return Object.hasOwn(catalog, name) ? '用法：git ' + catalog[name][1] : '输入命令、参数或文件名，按 Tab 自动补全';
   }
 
@@ -224,6 +231,18 @@
     const { state, files, scene } = context, result = [];
     const add = (command, description) => { if (!result.some(x => x.command === command)) result.push({ command, description }); };
     const changed = files.filter(f => f.unstaged || f.conflict), staged = files.some(f => f.staged);
+    if (context.mode === 'remote') {
+      if (context.stale) add('git status', '远程已更新，先检查草稿，再点击“重新载入远程”');
+      else {
+        if (changed.length) add('git add ' + (changed.length <= 2 ? changed.map(f => quote(f.path)).join(' ') : '.'), '暂存协作者的文件改动');
+        if (staged) add('git commit -m "说明本次修改"', '将协作者暂存内容直接提交到所选虚拟远程分支');
+      }
+      if (staged) add('git diff --cached', '检查协作者准备提交的内容');
+      else if (changed.some(f => !f.untracked)) add('git diff', '检查协作者尚未暂存的改动');
+      add('git status', '查看协作者的工作区和暂存区');
+      add('git log --oneline', '查看所选远程分支的提交历史');
+      return result.slice(0, 4);
+    }
     const op = state.pending, current = headId(state);
     if (op) {
       const hasMarkers = path => /^(<<<<<<< |=======|>>>>>>> )/m.test(state.work[path] || '');
@@ -284,7 +303,7 @@
     }
 
     refresh(show = true, force = false) {
-      this.close(); this.hint.textContent = usage(this.input.value);
+      this.close(); this.hint.textContent = usage(this.input.value, this.getContext());
       if (!show || this.composing) return;
       this.items = complete(this.input.value, this.input.selectionStart ?? this.input.value.length, this.getContext(), force);
       if (!this.items.length) return;
