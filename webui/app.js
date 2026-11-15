@@ -13,6 +13,7 @@
   const graphViewer = new GitGraphViewer(graph, $('graph-stage'), () => ({ state: sim.state, title: SCENES[sim.scene].title }), cancelReplay);
   const assistant = new GitCommandAssist.Controller($('command'), assistContext);
   const lessonView = new GitLessons.View($('graph-stage'), fillCommand, route => { lesson.route = route; renderLesson(); });
+  const repositoryBrowser = new GitRepositoryBrowser.View(() => ({ state: sim.state }), cancelReplay);
   const labels = ['编辑与提交', '分叉与汇合', '解决同一行冲突', '改变提交的基点', '理解三种模式', '本地与远程同步'];
   const filePanel = $('files-title').closest('.files-panel');
   const modeBar = node('div', 'editor-mode-bar'); modeBar.setAttribute('role', 'group'); modeBar.setAttribute('aria-label', '选择文件编辑身份');
@@ -158,6 +159,7 @@
     const previousRoute = lesson.scene === scene ? lesson.route : undefined;
     cancelReplay(); sim.loadScene(scene); selectedFile = 'hello.txt'; selectedCommit = null; remoteBranch = null; dirty = false; lastResult = null;
     editorMode = 'local'; localBuffer = ''; remoteSessions.clear();
+    repositoryBrowser.reset();
     lesson = new GitLessons.Practice(scene, sim.snapshot(), previousRoute);
     graph.previous = new Map(); graph.previousTags = new Map();
     const info = SCENES[scene], index = Object.keys(SCENES).indexOf(scene);

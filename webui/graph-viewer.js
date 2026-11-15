@@ -154,3 +154,204 @@
 
   root.GitGraphViewer = GraphViewer;
 })(globalThis);
+
+/* 浏览已提交快照，不执行命令、不保存编辑草稿，也不提前同步远程引用。 */
+(function (root) {
+  'use strict';
+  const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+  const SOURCES = { remote: '远程仓库 · origin', local: '本地仓库', tracking: '本地远程跟踪 · origin/*' };
+
+  function fileStats(text) {
+    const rows = text ? text.split('\n') : [];
+    if (rows.at(-1) === '') rows.pop();
+    return { lines: rows.length, bytes: new TextEncoder().encode(text).length, rows };
+  }
+
+  /** 用路径分段区分目录边界，Map 避免普通文件名与对象原型属性冲突。 */
+  function listEntries(tree, directory = '') {
+    const prefix = directory ? directory + '/' : '', entries = new Map();
+    for (const path of Object.keys(tree)) {
+      if (!path.startsWith(prefix)) continue;
+      const relative = path.slice(prefix.length), split = relative.indexOf('/');
+      if (!relative) continue;
+      const name = split < 0 ? relative : relative.slice(0, split), target = prefix + name;
+      if (!entries.has(name)) entries.set(name, { name, path: target, directory: split >= 0, ...(split < 0 ? fileStats(tree[path]) : {}) });
+    }
+    return [...entries.values()].sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name, 'zh-CN'));
+  }
+
+  /** 来源决定对象可见范围；本地跟踪引用只读取本地对象，不借用远程尚未下载的文件。 */
+  function references(state, source) {
+    if (!own(SOURCES, source)) throw new Error('未知的仓库查看位置。');
+    const branches = source === 'remote' ? state.remote.branches : source === 'local' ? state.branches : state.tracking;
+    const refs = Object.entries(branches).sort(([a], [b]) => a.localeCompare(b, 'zh-CN')).map(([name, id]) => ({ key: 'branch:' + name, name, id }));
+    if (source === 'local' && !state.head.branch) refs.unshift({ key: 'head:', name: 'HEAD（分离状态）', id: state.head.id });
+    return refs;
+  }
+
+  class Model {
+    constructor() { this.source = 'remote'; this.reference = ''; this.directory = ''; this.file = null; }
+
+    /** 分支前进后重新读取快照；文件被删除时退回最近仍存在的目录，不展示旧文件内容。 */
+    read(state) {
+      const refs = references(state, this.source);
+      let ref = refs.find(ref => ref.key === this.reference);
+      if (!ref) {
+        ref = refs.find(ref => this.source === 'local' && ref.name === state.head.branch) || refs.find(ref => ref.name === 'main') || refs[0];
+        this.reference = ref?.key || '';
+      }
+      const commits = this.source === 'remote' ? state.remote.commits : state.commits;
+      const commit = ref && own(commits, ref.id) ? commits[ref.id] : null, tree = commit?.tree || {};
+      let notice = '';
+      if (this.file && !own(tree, this.file)) { this.file = null; notice = '该文件在当前版本中不存在，已返回目录。'; }
+      while (this.directory && !Object.keys(tree).some(path => path.startsWith(this.directory + '/'))) this.directory = this.directory.split('/').slice(0, -1).join('/');
+      return { source: this.source, refs, ref, commit, tree, directory: this.directory, file: this.file, entries: listEntries(tree, this.directory), total: Object.keys(tree).length, notice };
+    }
+
+    selectSource(source, state) {
+      const available = references(state, source), name = references(state, this.source).find(ref => ref.key === this.reference)?.name;
+      this.source = source; this.reference = available.find(ref => ref.name === name)?.key || '';
+      return this.read(state);
+    }
+
+    selectReference(key, state) {
+      if (!references(state, this.source).some(ref => ref.key === key)) throw new Error('该分支在当前查看位置不存在。');
+      this.reference = key; return this.read(state);
+    }
+
+    openPath(path, state) {
+      const snapshot = this.read(state);
+      if (own(snapshot.tree, path)) { this.file = path; this.directory = path.split('/').slice(0, -1).join('/'); }
+      else if (path === '' || Object.keys(snapshot.tree).some(file => file.startsWith(path + '/'))) { this.file = null; this.directory = path; }
+      else return false;
+      return true;
+    }
+  }
+
+  class View {
+    /** 原生 dialog 负责焦点范围与 Esc；关闭后还原入口焦点，不重建现有文件编辑器。 */
+    constructor(readContext, beforeOpen) {
+      this.readContext = readContext; this.beforeOpen = beforeOpen; this.model = new Model();
+      const make = (tag, className, text) => {
+        const item = document.createElement(tag); if (className) item.className = className;
+        if (text !== undefined) item.textContent = text;
+        return item;
+      };
+      this.make = make;
+      this.button = (text, action, className = 'repo-button') => { const item = make('button', className, text); item.type = 'button'; item.addEventListener('click', action); return item; };
+      this.trigger = this.button('仓库浏览', () => this.open(), 'button quiet repository-trigger'); this.trigger.id = 'repository-open';
+      this.trigger.setAttribute('aria-haspopup', 'dialog'); this.trigger.setAttribute('aria-controls', 'repository-browser');
+      document.getElementById('help-button').before(this.trigger);
+      this.dialog = make('dialog', 'repository-browser'); this.dialog.id = 'repository-browser';
+      this.dialog.setAttribute('aria-labelledby', 'repository-title'); this.dialog.setAttribute('aria-describedby', 'repository-hint');
+      const header = make('header', 'repo-header'), identity = make('div', 'repo-identity');
+      identity.append(make('span', 'repo-symbol', '▣'), make('h2', '', 'Git Playground'), make('span', 'repo-badge', '虚拟仓库'));
+      identity.querySelector('h2').id = 'repository-title';
+      this.closeButton = this.button('关闭', () => this.dialog.close()); this.closeButton.setAttribute('aria-label', '关闭仓库浏览');
+      header.append(identity, this.closeButton);
+      const tab = make('div', 'repo-code-tab'); tab.append(make('strong', '', '〈〉代码'), make('span', '', '浏览已提交文件'));
+      const controls = make('div', 'repo-controls');
+      this.sourceSelect = make('select'); this.sourceSelect.id = 'repository-source';
+      for (const [key, value] of Object.entries(SOURCES)) { const option = make('option', '', value); option.value = key; this.sourceSelect.append(option); }
+      this.branchSelect = make('select'); this.branchSelect.id = 'repository-branch';
+      for (const [label, select] of [['查看位置', this.sourceSelect], ['分支', this.branchSelect]]) {
+        const group = make('div', 'repo-control'), caption = make('label', '', label); caption.htmlFor = select.id; group.append(caption, select); controls.append(group);
+      }
+      this.count = make('span', 'repo-file-count'); controls.append(this.count);
+      this.sourceSelect.addEventListener('change', () => this.render(this.model.selectSource(this.sourceSelect.value, this.readContext().state)));
+      this.branchSelect.addEventListener('change', () => this.render(this.model.selectReference(this.branchSelect.value, this.readContext().state)));
+      this.hint = make('p', 'repo-hint'); this.hint.id = 'repository-hint';
+      this.notice = make('p', 'repo-notice'); this.notice.setAttribute('role', 'status');
+      this.commit = make('div', 'repo-latest');
+      this.breadcrumb = make('nav', 'repo-breadcrumb'); this.breadcrumb.setAttribute('aria-label', '仓库文件路径');
+      this.content = make('div', 'repo-content'); this.content.tabIndex = -1;
+      const body = make('div', 'repo-body'); body.append(this.commit, this.breadcrumb, this.content);
+      this.dialog.append(header, tab, controls, this.hint, this.notice, body); document.body.append(this.dialog);
+      this.dialog.addEventListener('close', () => {
+        // 原生 close 事件可能延迟到再次打开后才派发，此时保留新弹窗的滚动锁与焦点。
+        if (this.dialog.open) return;
+        document.body.classList.remove('repository-browser-open');
+        if (this.previousFocus?.isConnected) this.previousFocus.focus();
+      });
+      this.dialog.addEventListener('click', event => {
+        if (event.target !== this.dialog) return;
+        const rect = this.dialog.getBoundingClientRect();
+        if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) this.dialog.close();
+      });
+    }
+
+    reset() { this.model = new Model(); if (this.dialog.open) this.render(); }
+
+    open() {
+      if (this.dialog.open) return;
+      this.beforeOpen(); this.previousFocus = document.activeElement; this.render();
+      document.body.classList.add('repository-browser-open'); this.dialog.showModal(); this.branchSelect.focus();
+    }
+
+    navigate(path) {
+      if (!this.model.openPath(path, this.readContext().state)) return;
+      this.render(); this.content.focus(); this.content.parentElement.scrollTop = 0;
+    }
+
+    render(snapshot = this.model.read(this.readContext().state)) {
+      const make = this.make;
+      this.sourceSelect.value = snapshot.source;
+      this.branchSelect.replaceChildren(...snapshot.refs.map(ref => { const option = make('option', '', ref.name); option.value = ref.key; return option; }));
+      this.branchSelect.value = snapshot.ref?.key || ''; this.branchSelect.disabled = !snapshot.refs.length;
+      this.count.textContent = snapshot.total + ' 个已提交文件';
+      const meanings = { remote: '这里是远程实际提交的文件；协作者提交后即可查看，无需 fetch。', local: '这里是本地分支已提交的文件；工作区和暂存区中的未提交改动不在此显示。', tracking: '这里是本地记录的远程版本；fetch 更新跟踪引用，pull 才进一步整合本地分支。' };
+      this.hint.textContent = meanings[snapshot.source] + ' 此视图只读，切换查看不会切换 HEAD 或改动草稿。';
+      this.notice.textContent = snapshot.notice; this.notice.hidden = !snapshot.notice;
+      this.commit.replaceChildren(); this.breadcrumb.replaceChildren(); this.content.replaceChildren();
+      if (!snapshot.commit) {
+        this.content.append(make('p', 'repo-empty', snapshot.ref ? '当前提交对象不可用，请先同步对应的本地记录。' : '此位置暂无分支。可在本地创建分支并 push 后查看远程仓库。')); return;
+      }
+      this.commit.append(make('span', 'repo-commit-icon', '●'), make('strong', '', snapshot.commit.message), make('code', '', snapshot.commit.id));
+      this.breadcrumb.append(this.button('Git Playground', () => this.navigate(''), 'repo-path-button'));
+      const parts = (snapshot.file || snapshot.directory).split('/').filter(Boolean);
+      parts.forEach((part, i) => {
+        this.breadcrumb.append(make('span', 'repo-path-separator', '/'));
+        if (snapshot.file && i === parts.length - 1) { const current = make('span', 'repo-current-path', part); current.setAttribute('aria-current', 'page'); this.breadcrumb.append(current); }
+        else this.breadcrumb.append(this.button(part, () => this.navigate(parts.slice(0, i + 1).join('/')), 'repo-path-button'));
+      });
+      if (snapshot.file) this.renderFile(snapshot);
+      else this.renderDirectory(snapshot);
+    }
+
+    renderDirectory(snapshot) {
+      const make = this.make, list = make('div', 'repo-file-list'); list.setAttribute('aria-label', '已提交文件列表');
+      const heading = make('div', 'repo-list-heading'); heading.append(make('span', '', '名称'), make('span', '', '类型'), make('span', '', '大小')); list.append(heading);
+      if (snapshot.directory) list.append(this.button('↑ 返回上级目录', () => this.navigate(snapshot.directory.split('/').slice(0, -1).join('/')), 'repo-parent'));
+      for (const entry of snapshot.entries) {
+        const row = this.button('', () => this.navigate(entry.path), 'repo-file-row');
+        row.setAttribute('aria-label', (entry.directory ? '打开目录 ' : '查看文件 ') + entry.name);
+        const name = make('span', 'repo-entry-name'); name.append(make('span', entry.directory ? 'repo-folder-icon' : 'repo-file-icon', entry.directory ? '▰' : '▤'), make('span', '', entry.name));
+        row.append(name, make('span', 'repo-entry-type', entry.directory ? '目录' : '文本文件'), make('span', 'repo-entry-size', entry.directory ? '—' : entry.bytes + ' B')); list.append(row);
+      }
+      if (!snapshot.entries.length) list.append(make('p', 'repo-empty', '此提交没有文件。'));
+      this.content.append(list);
+      // README 只做文本预览，文件内容始终不经过 HTML 或 Markdown 执行器。
+      const readme = snapshot.entries.find(entry => !entry.directory && /^readme\.md$/i.test(entry.name));
+      if (readme) {
+        const preview = make('section', 'repo-readme'); preview.append(make('h3', '', readme.name + ' · 文本预览'), make('pre', '', snapshot.tree[readme.path])); this.content.append(preview);
+      }
+    }
+
+    renderFile(snapshot) {
+      const make = this.make, stats = fileStats(snapshot.tree[snapshot.file]), card = make('section', 'repo-file-card');
+      const header = make('div', 'repo-file-header');
+      header.append(make('strong', '', snapshot.file.split('/').at(-1)), make('span', '', stats.lines + ' 行 · ' + stats.bytes + ' B · 只读'), this.button('返回目录', () => this.navigate(snapshot.directory)));
+      const code = make('div', 'repo-code'); code.setAttribute('aria-label', '文件完整内容'); code.tabIndex = 0;
+      stats.rows.forEach((text, i) => {
+        const row = make('div', 'repo-code-line'), number = make('span', 'repo-line-number', String(i + 1)); number.setAttribute('aria-hidden', 'true');
+        row.append(number, make('span', 'repo-line-text', text)); code.append(row);
+      });
+      if (!stats.rows.length) code.append(make('p', 'repo-empty', '空文件'));
+      card.append(header, code); this.content.append(card);
+    }
+  }
+
+  const api = { Model, View, fileStats, listEntries, references };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { RepositoryBrowser: api };
+  else root.GitRepositoryBrowser = api;
+})(globalThis);
