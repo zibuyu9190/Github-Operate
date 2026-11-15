@@ -178,7 +178,7 @@
     graph.draw(sim.state, { animate }); renderRemote(); renderFiles();
     if (selectedCommit) {
       const commit = sim.state.commits[selectedCommit] || sim.state.remote.commits[selectedCommit];
-      if (commit) showCommit(commit, !Object.hasOwn(sim.state.commits, selectedCommit), false);
+      if (commit) showCommit(commit, !Object.hasOwn(sim.state.commits, selectedCommit));
     }
   }
 
@@ -301,10 +301,10 @@
     renderRecommendations(); renderLesson();
   }
 
-  function showCommit(commit, remoteOnly, expand = true) {
+  /** 选择节点只更新详情，展开与折叠由用户点击标题控制，刷新内容时保留手动选择。 */
+  function showCommit(commit, remoteOnly) {
     selectedCommit = commit.id; $('commit-summary').textContent = commit.id + ' · ' + commit.message + (remoteOnly ? '（仅远程）' : '');
     GitGraphViewer.renderCommit($('commit-content'), commit, sim.state);
-    if (expand) $('commit-detail').open = true;
   }
 
   function saveEditor(quiet = false) {

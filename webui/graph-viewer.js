@@ -133,11 +133,10 @@
       this.zoomOut.disabled = this.graph.zoom <= .6; this.zoomIn.disabled = this.graph.zoom >= 2.5;
     }
 
-    /** 快照只用文本节点呈现，文件内容与提交说明不会作为 HTML 执行。 */
+    /** 选择只更新纯文本详情，默认折叠；保留用户通过标题手动展开或收起的状态。 */
     showCommit(commit, remoteOnly) {
       this.summary.textContent = commit.id + ' · ' + commit.message + (remoteOnly ? '（仅远程）' : '');
       GraphViewer.renderCommit(this.content, commit, this.readContext().state);
-      this.details.open = true;
       this.details.scrollTop = 0;
       this.graph.resize();
     }

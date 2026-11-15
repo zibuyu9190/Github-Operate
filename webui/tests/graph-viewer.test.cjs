@@ -92,15 +92,17 @@ test('关闭事件延迟时立即重开，大图仍保留在弹窗内，最终�
   assert.deepEqual(f.parent.children, [f.stage, f.details]); assert.equal(f.graph.zoom, 1.8);
 });
 
-test('节点仍调用原快照回调，弹窗就地显示纯文本快照，文件中的 HTML 不生成元素', () => {
+test('节点更新纯文本详情但默认折叠，手动展开状态保留，文件中的 HTML 不生成元素', () => {
   const f = fixture(), commit = { id: 'C9', hash: 'test', message: '<img src=x>', parents: ['C1'], tree: { '<script>.txt': '<img onerror=alert(1)>' } };
   f.viewer.open(); f.graph.onSelect(commit, true);
-  assert.deepEqual(f.selections, ['C9']); assert.equal(f.viewer.details.open, true);
+  assert.deepEqual(f.selections, ['C9']); assert.equal(f.viewer.details.open, false);
   assert.equal(f.viewer.summary.textContent, 'C9 · <img src=x>（仅远程）');
   const elements = descendants(f.viewer.content);
   assert.ok(elements.some(item => item.textContent === '新增 · <script>.txt'));
   assert.ok(elements.some(item => item.className?.includes('commit-diff-added') && item.textContent === '+ <img onerror=alert(1)>'));
   assert.equal(elements.some(item => ['img', 'script'].includes(item.tag)), false);
+  f.viewer.details.open = true; f.graph.onSelect(f.sim.state.commits.C0, false);
+  assert.equal(f.viewer.details.open, true);
   f.viewer.dialog.close(); f.viewer.open();
   assert.equal(f.viewer.details.open, false); assert.equal(f.viewer.content.children.length, 0);
 });
