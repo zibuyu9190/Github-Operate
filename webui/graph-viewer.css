@@ -106,7 +106,20 @@ body.repository-browser-open { overflow: hidden !important; }
 .repo-line-number { position: sticky; left: 0; flex: none; width: 58px; padding: 0 16px 0 8px; background: #fff; color: #6e7781; text-align: right; user-select: none; }
 .repo-line-text { padding-right: 20px; white-space: pre; }
 .repo-empty { margin: 0; padding: 32px 18px; color: #59636e; text-align: center; line-height: 1.8; }
+/* 本地仓库状态独立于文件选择与协作者身份，长分支名在窄屏内换行。 */
+.repository-status { flex: none; min-width: 0; margin: 0 16px 12px; padding: 11px 13px; border: 1px solid #d5e5e8; border-radius: 9px; background: #f4faf9; color: #294657; }
+.repository-status-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; font-size: 12px; }
+.repository-status-heading strong { flex: none; font-size: 12px; }
+.repository-status-branch { min-width: 0; color: #526779; overflow-wrap: anywhere; }
+.repository-status-stash { flex: none; margin-left: auto; padding: 4px 9px; border: 1px solid #bcd6d6; border-radius: 6px; background: #fff; color: #17665b; font: inherit; cursor: pointer; }
+.repository-status-stash:hover { background: #e6f6f0; }
+.repository-status-stash:focus-visible { outline: 2px solid #0d9488; outline-offset: 2px; }
+.repository-status .repository-status-upstream { margin: 8px 0 0; color: #17665b; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.repository-status[data-state="unset"] .repository-status-upstream { color: #936016; }
+.repository-status .repository-status-sync { margin: 4px 0 0; color: #65798a; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 @media (max-width: 680px) {
+  .repository-status { margin: 0 12px 12px; padding: 10px 12px; }
+  .repository-status-branch { flex-basis: 100%; order: 1; }
   .repository-browser { width: calc(100vw - 16px); height: calc(100dvh - 16px); max-height: calc(100dvh - 16px); }
   .repo-header { padding: 14px; }
   .repo-identity h2 { font-size: 17px; }

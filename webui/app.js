@@ -16,6 +16,7 @@
   const repositoryBrowser = new GitRepositoryBrowser.View(() => ({ state: sim.state }), cancelReplay);
   const labels = ['编辑与提交', '分叉与汇合', '解决同一行冲突', '改变提交的基点', '理解三种模式', '本地与远程同步'];
   const filePanel = $('files-title').closest('.files-panel');
+  const repositoryStatus = new GitRepositoryBrowser.StatusView(filePanel, fillCommand);
   const modeBar = node('div', 'editor-mode-bar'); modeBar.setAttribute('role', 'group'); modeBar.setAttribute('aria-label', '选择文件编辑身份');
   const localModeButton = node('button', 'button quiet small', '我的本地'), remoteModeButton = node('button', 'button quiet small', '模拟协作者');
   localModeButton.type = remoteModeButton.type = 'button'; localModeButton.id = 'editor-local'; remoteModeButton.id = 'editor-remote';
@@ -230,6 +231,7 @@
   }
 
   function renderFiles() {
+    repositoryStatus.update(sim.state);
     const remote = editorMode === 'remote';
     localModeButton.setAttribute('aria-pressed', String(!remote)); remoteModeButton.setAttribute('aria-pressed', String(remote));
     filePanel.classList.toggle('editing-remote', remote); remoteToolbar.hidden = !remote; remoteActions.hidden = !remote;
@@ -573,6 +575,7 @@
   $('remote-branch').addEventListener('change', () => { remoteBranch = $('remote-branch').value; renderRemote(); if (editorMode === 'remote') renderFiles(); });
   $('remote-commit').addEventListener('click', () => {
     switchEditorMode('remote'); filePanel.scrollIntoView({ block: 'start' }); $('file-editor').focus();
+    repositoryStatus.highlightCollaborator();
   });
   $('replay').addEventListener('click', replay); $('restart').addEventListener('click', () => loadScene(sim.scene));
   $('help-button').addEventListener('click', () => $('help-dialog').showModal()); $('close-help').addEventListener('click', () => $('help-dialog').close());
