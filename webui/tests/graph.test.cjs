@@ -206,6 +206,9 @@ function assertLabelsClear(view, state) {
 
 test('根提交挂 origin/main 且下方分为三支：标签与提交线、其他引用指针留有间距', () => {
   const view = renderer(false), sim = new Simulator('basic');
+  // 固定根提交上的远程引用，保留此布局回归用例，不依赖基础场景的预置历史长度。
+  run(sim, 'git reset --hard C0');
+  sim.state.tracking.main = 'C0'; sim.state.remote.branches.main = 'C0';
   run(sim, 'git switch -c dev'); commitFile(sim, 'dev.txt', 'dev\n');
   run(sim, 'git switch main'); run(sim, 'git switch -c test01'); commitFile(sim, 'test.txt', 'test\n');
   run(sim, 'git switch main'); commitFile(sim, 'main.txt', 'main\n');

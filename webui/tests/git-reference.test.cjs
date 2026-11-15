@@ -32,8 +32,15 @@ function fixture(t) {
   const sim = new Simulator();
   git(['init', '-b', 'main']);
   const edit = (file, text) => { sim.editFile(file, text); fs.mkdirSync(path.dirname(path.join(directory, file)), { recursive: true }); fs.writeFileSync(path.join(directory, file), text, 'utf8'); };
-  for (const [file, text] of Object.entries(sim.headTree())) fs.writeFileSync(path.join(directory, file), text, 'utf8');
-  git(['add', '.']); git(['commit', '-m', '初始化练习仓库']);
+  // 按场景的真实起点重建全部预置提交，文件快照与父链都参与后续对照。
+  let initialFiles = [];
+  for (const commit of Object.values(sim.state.commits).sort((a, b) => a.order - b.order)) {
+    for (const file of initialFiles) if (!Object.hasOwn(commit.tree, file)) fs.unlinkSync(path.join(directory, file));
+    for (const [file, text] of Object.entries(commit.tree)) {
+      fs.mkdirSync(path.dirname(path.join(directory, file)), { recursive: true }); fs.writeFileSync(path.join(directory, file), text, 'utf8');
+    }
+    git(['add', '.']); git(['commit', '-m', commit.message]); initialFiles = Object.keys(commit.tree);
+  }
   const command = (...args) => {
     const encoded = ['git', ...args.map(x => /\s/.test(x) ? '"' + x.replaceAll('"', '\\"') + '"' : x)].join(' ');
     const result = sim.execute(encoded), actual = git(args, true);

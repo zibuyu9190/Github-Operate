@@ -38,7 +38,7 @@ test('restore 区分 HEAD、暂存区和工作区，新增/删除及多文件失
 });
 
 test('stash push 保存独立快照，默认保留未跟踪文件，pop 不恢复原暂存划分', () => {
-  const sim = new Simulator(), head = sim.headId();
+  const sim = new Simulator(), head = sim.headId(), commitCount = Object.keys(sim.state.commits).length;
   sim.editFile('hello.txt', '暂存版\n'); run(sim, 'git add hello.txt'); sim.editFile('hello.txt', '工作版\n');
   sim.editFile('new.txt', '未跟踪\n'); run(sim, 'git stash push -m "第一次"');
   assert.equal(sim.state.work['new.txt'], '未跟踪\n'); assert.equal(sim.state.index['hello.txt'], sim.headTree()['hello.txt']);
@@ -48,7 +48,7 @@ test('stash push 保存独立快照，默认保留未跟踪文件，pop 不恢�
   run(sim, 'git stash pop'); assert.equal(sim.state.work['README.md'], '另一份\n'); assert.equal(sim.state.work['new.txt'], '未跟踪\n');
   run(sim, 'git restore README.md'); run(sim, 'git stash pop');
   assert.equal(sim.state.work['hello.txt'], '工作版\n'); assert.equal(sim.state.index['hello.txt'], sim.headTree()['hello.txt']);
-  assert.equal(sim.headId(), head); assert.equal(Object.keys(sim.state.commits).length, 1); assert.equal(sim.state.stashes.length, 0);
+  assert.equal(sim.headId(), head); assert.equal(Object.keys(sim.state.commits).length, commitCount); assert.equal(sim.state.stashes.length, 0);
   assert.equal(sim.execute('git stash pop').ok, false);
 });
 
@@ -91,11 +91,13 @@ test('stash 冲突可 reset --hard 丢弃，记录保留；场景重置清空 st
 });
 
 test('show、branch 与 remote 只读查询，不提前读取虚拟远程的新引用', () => {
-  const sim = new Simulator(); commit(sim, 'hello.txt', '<img src=x onerror=alert(1)>\n'); sim.simulateRemote();
+  const sim = new Simulator(), initial = sim.headId();
+  commit(sim, 'hello.txt', '<img src=x onerror=alert(1)>\n'); sim.simulateRemote();
   const before = sim.snapshot();
   assert.match(run(sim, 'git show HEAD').output, /\+<img src=x onerror=alert\(1\)>/);
-  assert.match(run(sim, 'git show HEAD~1').output, /初始化练习仓库/);
-  assert.match(run(sim, 'git branch -a').output, /remotes\/origin\/main → C0/);
+  assert.ok(run(sim, 'git show HEAD~1').output.includes(sim.state.commits[initial].message));
+  assert.match(run(sim, 'git show C0').output, /初始化练习仓库/);
+  assert.ok(run(sim, 'git branch -a').output.includes('remotes/origin/main → ' + initial));
   assert.match(run(sim, 'git branch -vv').output, /origin\/main：领先 1，落后 0/);
   assert.match(run(sim, 'git remote -v').output, /无真实地址/); assert.deepEqual(sim.snapshot(), before);
   run(sim, 'git fetch'); assert.match(run(sim, 'git branch -a -vv').output, /领先 1，落后 1/);

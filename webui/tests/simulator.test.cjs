@@ -13,6 +13,26 @@ function change(sim, path, text, message = '修改文件') {
   sim.editFile(path, text); run(sim, 'git add .'); run(sim, 'git commit -m "' + message + '"');
 }
 
+test('基础场景预置三次连续 main 提交且远程同步，刷新或重置恢复干净起点', () => {
+  const sim = new Simulator();
+  const check = () => {
+    assert.equal(sim.state.head.branch, 'main'); assert.equal(sim.headId(), 'C2');
+    assert.deepEqual(Object.keys(sim.state.commits), ['C0', 'C1', 'C2']);
+    assert.deepEqual(sim.state.commits.C0.parents, []); assert.deepEqual(sim.state.commits.C1.parents, ['C0']); assert.deepEqual(sim.state.commits.C2.parents, ['C1']);
+    assert.match(sim.state.commits.C1.tree['README.md'], /提交练习/);
+    assert.doesNotMatch(sim.state.commits.C1.tree['README.md'], /远程同步/);
+    assert.match(sim.state.commits.C2.tree['README.md'], /远程同步/);
+    assert.equal(sim.state.tracking.main, 'C2'); assert.equal(sim.state.remote.branches.main, 'C2');
+    assert.deepEqual(sim.state.remote.commits, sim.state.commits);
+    assert.notEqual(sim.state.remote.commits.C2, sim.state.commits.C2);
+    assert.equal(sim.isClean(), true); assert.equal(sim.state.stashes.length, 0); assert.equal(sim.state.reflog.length, 1);
+  };
+  check(); change(sim, 'hello.txt', '我的练习\n'); assert.deepEqual(sim.state.commits[sim.headId()].parents, ['C2']);
+  sim.loadScene('basic'); check();
+  sim.loadScene('branches'); sim.loadScene('basic'); check();
+  assert.equal(new Simulator().headId(), 'C2');
+});
+
 test('解析引号、中文、空格文件名及空字符串，拒绝歧义参数', () => {
   assert.deepEqual(tokenize('git add "hello world.txt"'), ['git', 'add', 'hello world.txt']);
   assert.equal(parse('git commit -m "中文 \\"引号\\""'.replace(/\\\\/g, '\\')).name, 'commit');
@@ -142,7 +162,7 @@ test('revert 创建反向提交，保留原历史；支持冲突继续/中止与
     if (abort) { run(conflict, 'git revert --abort'); assert.deepEqual(conflict.state.work, before.work); }
     else { conflict.editFile('hello.txt', '人工撤回\n'); run(conflict, 'git add .'); run(conflict, 'git revert --continue'); assert.equal(conflict.headTree()['hello.txt'], '人工撤回\n'); }
   }
-  const root = new Simulator(); run(root, 'git revert HEAD'); assert.deepEqual(root.headTree(), {});
+  const root = new Simulator(); run(root, 'git checkout C0'); run(root, 'git revert HEAD'); assert.deepEqual(root.headTree(), {});
 });
 
 test('远程实际状态独立推进，fetch 仅更新对象及 tracking', () => {

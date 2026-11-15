@@ -828,7 +828,14 @@
         const next = clone(this.headTree()); edit(next);
         const id = this.newCommit(next, [this.headId()], message); this.moveHead(id); this.installTree(next); return id;
       };
-      if (['branches', 'conflict', 'rebase'].includes(scene)) {
+      if (scene === 'basic') {
+        save('补充 README 中的提交练习步骤', t => { t['README.md'] += '\n## 提交练习\n\n编辑 hello.txt，保存后执行 git add hello.txt，再执行 git commit。\n'; });
+        save('补充 README 中的远程同步说明', t => { t['README.md'] += '\n## 远程同步\n\nfetch 更新远程跟踪记录，pull 整合到当前分支，push 上传本地提交。\n'; });
+        // 基础场景预置完整历史并同步虚拟远程，避免起点就出现待推送提交或误算练习进度。
+        const tip = this.headId();
+        this.state.remote = { commits: clone(this.state.commits), branches: { main: tip } };
+        this.state.tracking.main = tip;
+      } else if (['branches', 'conflict', 'rebase'].includes(scene)) {
         save('准备分支练习', t => { t['notes.txt'] = '学习分支与 HEAD\n'; });
         this.state.branches.bugFix = this.headId();
         this.state.head.branch = 'bugFix';
@@ -851,7 +858,7 @@
   }
 
   const SCENES = {
-    basic: { title: '基础提交', subtitle: '让一次改动，成为一个提交。', hint: '先编辑 hello.txt 并保存，再依次执行 add 和 commit。', commands: ['git status', 'git add hello.txt', 'git commit -m "第一次修改"', 'git log --oneline'] },
+    basic: { title: '基础提交', subtitle: '让一次改动，成为一个提交。', hint: 'main 已预置 3 次提交。先编辑 hello.txt 并保存，再依次执行 add 和 commit，观察新节点。', commands: ['git status', 'git add hello.txt', 'git commit -m "第一次修改"', 'git log --oneline'] },
     branches: { title: '分支与合并', subtitle: '两个分支，如何汇成一条历史？', hint: 'main 和 bugFix 已经分叉，合并它们，观察双亲提交。', commands: ['git branch', 'git merge bugFix', 'git switch bugFix', 'git switch main'] },
     conflict: { title: '合并冲突', subtitle: '同一行有两种答案，由你决定。', hint: '执行 merge 后，编辑 hello.txt 的冲突标记，add 并继续。', commands: ['git merge bugFix', 'git add hello.txt', 'git merge --continue', 'git merge --abort'] },
     rebase: { title: '变基练习', subtitle: '把你的改动，搬到新的起点。', hint: '当前位于 bugFix。把它变基到 main，观察旧、新提交的区别。', commands: ['git rebase main', 'git log --oneline --graph --all', 'git rebase --continue', 'git rebase --abort'] },
