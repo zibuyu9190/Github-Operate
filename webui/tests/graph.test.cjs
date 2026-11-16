@@ -7,14 +7,14 @@ const { Simulator, SCENES } = require('../simulator.js');
 
 /** 最小 DOM 仅用于观察真实绘图器输出与动画调用，不替代浏览器布局验证。 */
 function renderer(reducedMotion) {
-  const animations = [];
+  const animations = [], animationOptions = [];
   class Element {
     constructor(tag) { this.tag = tag; this.attrs = {}; this.children = []; this.style = {}; this.events = {}; this.classList = { add() {}, remove() {} }; }
     setAttribute(name, value) { this.attrs[name] = value; }
     append(...nodes) { this.children.push(...nodes); }
     replaceChildren(...nodes) { this.children = nodes; }
     addEventListener(name, handler) { this.events[name] = handler; }
-    animate(frames) { animations.push(frames); }
+    animate(frames, options) { animations.push(frames); animationOptions.push(options); }
     querySelectorAll() { return []; }
   }
   const context = vm.createContext({ document: { createElementNS: (_ns, tag) => new Element(tag) }, matchMedia: () => ({ matches: reducedMotion }) });
@@ -22,7 +22,7 @@ function renderer(reducedMotion) {
   const svg = new Element('svg'); svg.parentElement = { clientWidth: 900, clientHeight: 395 };
   const selections = [], graph = new context.CommitGraph(svg, commit => selections.push(commit.id));
   const all = () => { const found = []; const scan = item => { found.push(item); item.children.forEach(scan); }; scan(svg); return found; };
-  return { graph, svg, animations, selections, all };
+  return { graph, svg, animations, animationOptions, selections, all };
 }
 
 test('提交图布局保留分叉，边指向父提交，节点支持键盘选择', () => {
@@ -72,6 +72,16 @@ for (const reduced of [false, true]) test('分支移动在减少动画偏好为 
   assert.equal(view.animations.length > 0, !reduced);
   assert.ok(view.animations.every(frames => frames.every(frame => !Object.hasOwn(frame, 'transform'))));
   const orphan = view.all().find(e => e.attrs['aria-label']?.startsWith('C2 ')); assert.match(orphan.attrs.class, /orphan/);
+});
+
+test('手动重播可放慢分支指针提示，正常命令与减少动画偏好保持原行为', () => {
+  for (const reduced of [false, true]) for (const duration of [undefined, 3000]) {
+    const view = renderer(reduced), sim = new Simulator('reset'); view.graph.draw(sim.state);
+    sim.execute('git reset --hard HEAD~1');
+    view.graph.draw(sim.state, { animate: true, animationDuration: duration });
+    assert.equal(view.animationOptions.length > 0, !reduced);
+    assert.ok(view.animationOptions.every(options => options.duration === (duration ?? 450)));
+  }
 });
 
 test('fetch 前远程独有节点有区别标记，分支文本保持纯文本', () => {

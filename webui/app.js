@@ -449,15 +449,24 @@
   }
 
   /** 重播只切换图形视图，不重新执行命令，也不改动当前虚拟仓库。 */
-  function cancelReplay() { if (replayTimer) clearTimeout(replayTimer); replayTimer = null; $('graph-stage').classList.remove('replaying'); if (lastResult) $('replay').disabled = false; }
+  const REPLAY_BEFORE_MS = 1000, REPLAY_EFFECT_MS = 3000;
+  function cancelReplay() {
+    if (replayTimer) clearTimeout(replayTimer);
+    replayTimer = null; $('graph-stage').classList.remove('replaying'); document.body.classList.remove('replay-active');
+    if (lastResult) $('replay').disabled = false;
+  }
 
   function replay() {
     if (!lastResult) return;
     cancelReplay(); $('replay').disabled = true;
     const before = lastResult.graphBefore || lastResult.before, after = lastResult.graphAfter || lastResult.after;
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) { graph.draw(after); animateFiles(lastResult); $('replay').disabled = false; return; }
-    $('graph-stage').classList.add('replaying'); graph.draw(before);
-    replayTimer = setTimeout(() => { graph.draw(after, { animate: true }); animateFiles(lastResult); $('graph-stage').classList.remove('replaying'); $('replay').disabled = false; replayTimer = null; }, 700);
+    document.body.classList.add('replay-active'); $('graph-stage').classList.add('replaying'); graph.draw(before);
+    // 先停留观察起点，再完整播放慢速动画；第二阶段也保持可取消，避免切换场景后残留回调。
+    replayTimer = setTimeout(() => {
+      graph.draw(after, { animate: true, animationDuration: REPLAY_EFFECT_MS }); animateFiles(lastResult);
+      replayTimer = setTimeout(cancelReplay, REPLAY_EFFECT_MS);
+    }, REPLAY_BEFORE_MS);
   }
 
   Object.entries(SCENES).forEach(([key, info], i) => {
@@ -661,6 +670,7 @@
       renderFiles(); message('已选择此版本，请检查内容，再 git add 并继续。');
     });
   }
+  $('replay').title = '约 4 秒：观察起点 1 秒，再展示变化 3 秒';
   $('replay').addEventListener('click', replay); $('restart').addEventListener('click', () => loadScene(sim.scene));
   $('help-button').addEventListener('click', () => $('help-dialog').showModal()); $('close-help').addEventListener('click', () => $('help-dialog').close());
   $('help-dialog').addEventListener('click', event => { if (event.target === $('help-dialog')) { const rect = $('help-dialog').getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) $('help-dialog').close(); } });

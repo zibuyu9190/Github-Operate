@@ -271,7 +271,7 @@
         const previous = this.previousTags?.get(ref.key);
         if (options.animate && previous && !matchMedia('(prefers-reduced-motion: reduce)').matches && (previous.x !== x || previous.y !== y)) {
           // 在新位置淡入提示指针变化，避免平移动画扫过已经重绘的提交连线。
-          group.animate([{ opacity: .35 }, { opacity: 1 }], { duration: 450, easing: 'ease-out' });
+          group.animate([{ opacity: .35 }, { opacity: 1 }], { duration: options.animationDuration ?? 450, easing: 'ease-out' });
         }
       }
       this.previous = positions; this.previousTags = tagPositions;

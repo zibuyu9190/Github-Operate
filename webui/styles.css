@@ -22,3 +22,20 @@
 .terminal-command-success { color: #6ee7b7; }
 .terminal-command-error { color: #f87171; }
 .terminal-command-conflict { color: #fbbf24; }
+
+/* 慢速只用于手动重播；正常执行命令保留原有速度，减少动画规则仍可覆盖。 */
+.replay-active .new-node,
+.replay-active .flow.flash .flow-active {
+  animation-duration: 3s;
+}
+
+.replay-active .file-flowing .work-area,
+.replay-active .file-flowing .index-area,
+.replay-active .commit-flowing .head-area {
+  animation-duration: 2.4s;
+}
+
+.replay-active .file-flowing .index-area,
+.replay-active .commit-flowing .head-area {
+  animation-delay: 0.6s;
+}
