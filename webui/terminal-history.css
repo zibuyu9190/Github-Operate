@@ -1,0 +1,7 @@
+.terminal-history { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-top: 8px; }
+.terminal-history button { min-height: 30px; padding: 4px 10px; border: 1px solid #475569; border-radius: 6px; background: #172338; color: #e2e8f0; font: inherit; font-size: 12px; cursor: pointer; }
+.terminal-history button:hover:not(:disabled) { border-color: #34d399; color: #a7f3d0; }
+.terminal-history button:disabled { color: #94a3b8; opacity: .6; cursor: default; }
+.terminal-history button:focus-visible { outline: 2px solid #34d399; outline-offset: 2px; }
+.terminal-history .terminal-history-feedback { margin: 0; color: #a7f3d0; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.terminal-history-feedback:empty { display: none; }

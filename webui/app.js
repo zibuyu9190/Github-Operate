@@ -10,6 +10,7 @@
   let editorMode = 'local', localBuffer = '';
   let collaboratorSession = null;
   const commandSessions = new Map();
+  const commandHistory = new GitTerminalHistory.History();
   const graph = new CommitGraph($('graph'), showCommit);
   const graphViewer = new GitGraphViewer(graph, $('graph-stage'), () => ({ state: graphState(), title: SCENES[sim.scene].title + (editorMode === 'remote' ? ' · 协作者本地' : ' · 我的本地') }), cancelReplay);
   const assistant = new GitCommandAssist.Controller($('command'), assistContext);
@@ -30,6 +31,7 @@
   terminalBranchLabel.append(terminalBranch);
   const terminalScope = node('p', 'terminal-scope'); terminalScope.id = 'terminal-scope'; terminalScope.setAttribute('role', 'status');
   terminalContext.append(terminalModes, terminalBranchLabel, terminalScope); $('terminal').before(terminalContext);
+  const historyCopy = new GitTerminalHistory.View(terminalContext, commandHistory, () => ({ actor: editorMode, scene: SCENES[sim.scene].title }));
   $('terminal').closest('.command-panel').classList.add('has-terminal-context');
   $('command').setAttribute('aria-describedby', $('command').getAttribute('aria-describedby') + ' terminal-scope');
   const modeBar = node('div', 'editor-mode-bar'); modeBar.setAttribute('role', 'group'); modeBar.setAttribute('aria-label', '选择文件编辑身份');
@@ -107,6 +109,7 @@
     terminalContext.classList.toggle('is-remote', remote); terminalBranchLabel.hidden = !remote;
     terminalScope.textContent = remote ? '当前操作：协作者本地 · ' + (remoteBranch || '分离 HEAD') + '。支持与我的本地相同的命令；commit 后需 push 才发布到共享远程。' : '当前操作：我的本地 · ' + (sim.state.head.branch || '分离 HEAD') + '。commit 后需 push 才会更新虚拟远程。';
     $('command').placeholder = remote ? '输入协作者命令，如 git add hello.txt' : '输入 Git 命令，如 git status';
+    historyCopy.update();
     assistant.refresh(false);
   }
 
@@ -129,8 +132,9 @@
   /** 按钮与命令行复用相同执行入口，避免按钮提交和终端提交出现不同语义。 */
   function runRemoteAction(command) {
     const session = remoteSession(); if (!session || (session.dirty && !saveRemoteEditor(true))) return;
+    const branch = session.workspace.branch;
     cancelReplay(); const result = session.workspace.execute(sim, command);
-    terminalEntry('[协作者本地 · ' + (remoteBranch || '分离 HEAD') + '] $ ' + command, result.output, result);
+    terminalEntry(command, result.output, result, 'remote', branch);
     if (result.ok && result.command.name === 'commit') session.message = '';
     if (result.ok && result.conflict) session.selectedFile = session.workspace.pending.unresolved[0];
     render(result.ok); updateExplanation(result, command);
@@ -188,9 +192,10 @@
   }
 
   /** 命令状态取自实际执行结果；用户文本只进入文本节点，不拼接 HTML。 */
-  function terminalEntry(command, output, result = null) {
+  function terminalEntry(command, output, result, actor, branch) {
+    commandHistory.record({ actor, branch, scene: SCENES[sim.scene].title, command, output, result }); historyCopy.update();
     const entry = node('div', 'terminal-entry');
-    const commandLine = node('div', 'terminal-command', command);
+    const commandLine = node('div', 'terminal-command', '[' + (actor === 'remote' ? '协作者本地' : '我的本地') + ' · ' + (branch || '分离 HEAD') + '] $ ' + command);
     const type = !result ? '' : !result.ok ? 'terminal-error' : result.conflict || result.paused ? 'terminal-conflict' : '';
     if (result) {
       const status = !result.ok ? ['error', '✕ 失败'] : result.conflict ? ['conflict', '⚠ 待解决冲突'] : result.paused ? ['conflict', '⚠ 已暂停'] : ['success', '✓ 成功'];
@@ -220,10 +225,17 @@
     return button;
   }
 
+  /** 场景与页面生命周期共用清理入口，同时清空两方日志、上下键历史和未执行输入。 */
+  function clearCommandHistory() {
+    commandSessions.clear(); history = []; historyIndex = 0; draft = '';
+    commandHistory.clear(); historyCopy.reset();
+    $('terminal').replaceChildren(); $('terminal').scrollTop = 0; $('command').value = ''; assistant.refresh(false);
+  }
+
   function loadScene(scene) {
     const previousRoute = lesson.scene === scene ? lesson.route : undefined;
     cancelReplay(); sim.loadScene(scene); selectedFile = 'hello.txt'; selectedCommit = null; remoteBranch = null; dirty = false; lastResult = null;
-    editorMode = 'local'; localBuffer = ''; collaboratorSession = null; commandSessions.clear(); history = []; historyIndex = 0; draft = '';
+    editorMode = 'local'; localBuffer = ''; collaboratorSession = null; clearCommandHistory();
     repositoryBrowser.reset();
     lesson = new GitLessons.Practice(scene, sim.snapshot(), previousRoute);
     graph.previous = new Map(); graph.previousTags = new Map();
@@ -435,11 +447,12 @@
     const input = $('command').value.trim(); if (!input) return;
     const remote = editorMode === 'remote', session = remote ? remoteSession() : null;
     if ((remote ? session?.dirty : dirty) && !saveEditor(true)) return;
+    const branch = remote ? session?.workspace.branch : sim.state.head.branch;
     history.push(input); historyIndex = history.length; draft = '';
     const result = remote ? session ? session.workspace.execute(sim, input) : { ok: false, output: '暂无远程分支，请切回本地 push 后再试。', explanation: '命令未执行。' } : sim.execute(input);
     if (!remote) lesson.record(result);
     else if (result.ok && result.command.name === 'commit') { session.message = ''; showCommit(session.workspace.commits[result.commitId], false); }
-    terminalEntry('[' + (remote ? '协作者本地 · ' + (remoteBranch || '分离 HEAD') : '我的本地 · ' + (sim.state.head.branch || '分离 HEAD')) + '] $ ' + input, result.output, result);
+    terminalEntry(input, result.output, result, editorMode, branch);
     if (remote && result.ok && result.conflict) session.selectedFile = session.workspace.pending.unresolved[0];
     $('command').value = ''; message(); if (!remote) dirty = false; render(result.ok); updateExplanation(result, input);
     if (result.ok) { lastResult = result; $('replay').disabled = false; }
@@ -671,6 +684,8 @@
   document.addEventListener('keydown', event => { if (event.key === '?' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) && !$('help-dialog').open && !graphViewer.dialog.open) $('help-dialog').showModal(); });
   $('zoom-in').addEventListener('click', () => graph.setZoom(graph.zoom + .2)); $('zoom-out').addEventListener('click', () => graph.setZoom(graph.zoom - .2)); $('zoom-reset').addEventListener('click', () => graph.setZoom(1));
   window.addEventListener('resize', () => graph.resize());
+  // pagehide 也在页面进入往返缓存时清理，避免返回或恢复页面时带回旧命令。
+  window.addEventListener('pagehide', clearCommandHistory);
   loadScene('basic');
 })();
 

@@ -189,6 +189,8 @@ function Invoke-StaticRequest {
         '/graph.js' = @('graph.js', 'text/javascript; charset=utf-8')
         '/graph-viewer.js' = @('graph-viewer.js', 'text/javascript; charset=utf-8')
         '/graph-viewer.css' = @('graph-viewer.css', 'text/css; charset=utf-8')
+        '/terminal-history.js' = @('terminal-history.js', 'text/javascript; charset=utf-8')
+        '/terminal-history.css' = @('terminal-history.css', 'text/css; charset=utf-8')
         '/app.js' = @('app.js', 'text/javascript; charset=utf-8')
     }
     if (-not $assets.ContainsKey($requestPath)) {
