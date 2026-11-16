@@ -409,7 +409,7 @@
     $('command').value = ''; message(); if (!remote) dirty = false; render(result.ok); updateExplanation(result, input);
     if (result.ok) { lastResult = result; $('replay').disabled = false; }
     if (!remote && result.ok && result.conflict) { selectedFile = sim.state.pending.unresolved[0]; renderFiles(); }
-    if (result.ok && result.command.name !== 'log') requestAnimationFrame(() => { $('graph-stage').scrollTop = $('graph-stage').scrollHeight; });
+    if (result.ok && result.command.name !== 'log') requestAnimationFrame(() => { $('graph-stage').scrollLeft = $('graph-stage').scrollWidth; });
   }
 
   /** 重播只切换图形视图，不重新执行命令，也不改动当前虚拟仓库。 */

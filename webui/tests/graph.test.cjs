@@ -19,7 +19,7 @@ function renderer(reducedMotion) {
   }
   const context = vm.createContext({ document: { createElementNS: (_ns, tag) => new Element(tag) }, matchMedia: () => ({ matches: reducedMotion }) });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../graph.js'), 'utf8'), context);
-  const svg = new Element('svg'); svg.parentElement = { clientHeight: 395 };
+  const svg = new Element('svg'); svg.parentElement = { clientWidth: 900, clientHeight: 395 };
   const selections = [], graph = new context.CommitGraph(svg, commit => selections.push(commit.id));
   const all = () => { const found = []; const scan = item => { found.push(item); item.children.forEach(scan); }; scan(svg); return found; };
   return { graph, svg, animations, selections, all };
@@ -28,11 +28,42 @@ function renderer(reducedMotion) {
 test('提交图布局保留分叉，边指向父提交，节点支持键盘选择', () => {
   const view = renderer(false), sim = new Simulator('branches'); view.graph.draw(sim.state);
   const layout = view.graph.layout(sim.state);
-  assert.ok(layout.positions.get('C0').y < layout.positions.get('C1').y);
-  assert.equal(layout.positions.get('C2').y, layout.positions.get('C3').y);
-  assert.ok(layout.positions.get('C2').x < layout.positions.get('C3').x);
+  assert.ok(layout.positions.get('C0').x < layout.positions.get('C1').x);
+  assert.equal(layout.positions.get('C2').x, layout.positions.get('C3').x);
+  assert.ok(layout.positions.get('C2').y < layout.positions.get('C3').y);
   const edges = view.all().filter(e => e.attrs.class === 'commit-edge'); assert.equal(edges.length, 3); assert.ok(edges.every(e => e.attrs['marker-end'] === 'url(#parent-arrow)'));
   const node = view.all().find(e => e.attrs['aria-label']?.startsWith('C2 ')); node.events.keydown({ key: 'Enter', preventDefault() {} }); assert.deepEqual(view.selections, ['C2']);
+});
+
+test('基础历史从左向右展开，节点和标签文字保持正向，所有标签都在画布内', () => {
+  const view = renderer(false), sim = new Simulator(); view.graph.draw(sim.state);
+  const layout = view.graph.layout(sim.state), points = ['C0', 'C1', 'C2'].map(id => layout.positions.get(id));
+  assert.ok(points[0].x < points[1].x && points[1].x < points[2].x);
+  assert.ok(points.every(point => point.y === points[0].y));
+  assert.ok(layout.width > layout.height);
+  for (const tag of layout.labels) {
+    assert.ok(tag.x >= 0 && tag.x + tag.width <= layout.width);
+    assert.ok(tag.y >= 0 && tag.y + tag.height <= layout.height);
+  }
+  assert.ok(view.all().every(element => !/rotate|matrix/.test(element.attrs.transform || '')));
+  assert.ok(view.all().some(element => element.textContent === 'origin/main'));
+  assert.ok(view.all().some(element => element.textContent === 'HEAD'));
+});
+
+test('横向画布在主面板、放大弹窗和窄屏中等比缩放，放大后两轴均可滚动', () => {
+  const view = renderer(false), sim = new Simulator('branches'); view.graph.draw(sim.state);
+  for (const [width, height] of [[900, 395], [1198, 561], [340, 240]]) {
+    view.svg.parentElement = { clientWidth: width, clientHeight: height };
+    view.graph.setZoom(1);
+    assert.equal(parseFloat(view.svg.style.width), width);
+    assert.equal(parseFloat(view.svg.style.height), height);
+    view.graph.setZoom(2);
+    assert.equal(parseFloat(view.svg.style.width), width * 2);
+    assert.equal(parseFloat(view.svg.style.height), height * 2);
+    view.graph.setZoom(.6);
+    assert.equal(parseFloat(view.svg.style.width), width * .6);
+    assert.equal(parseFloat(view.svg.style.height), height * .6);
+  }
 });
 
 for (const reduced of [false, true]) test('分支移动在减少动画偏好为 ' + reduced + ' 时遵循动画策略', () => {
@@ -68,30 +99,30 @@ function commitFile(sim, path, text) {
   sim.editFile(path, text); run(sim, 'git add ' + path); run(sim, 'git commit -m "布局练习"'); return sim.headId();
 }
 
-test('交替在两分支提交后合并：延续父提交所在列，不因创建顺序交换左右', () => {
+test('交替在两分支提交后合并：延续父提交通道，不因创建顺序交换上下', () => {
   const view = renderer(false), sim = new Simulator('conflict');
   const main = commitFile(sim, 'hello.txt', 'main分支\n');
   run(sim, 'git switch bugFix'); const feature = commitFile(sim, 'hello.txt', 'bugfix\n');
   run(sim, 'git switch main'); assert.equal(run(sim, 'git merge bugFix').conflict, true);
   const merge = commitFile(sim, 'hello.txt', 'main分支\nbugfix\n'), before = sim.snapshot();
   view.graph.draw(sim.state); const { positions } = view.graph.layout(sim.state);
-  assert.equal(positions.get(main).x, positions.get('C3').x);
-  assert.equal(positions.get(feature).x, positions.get('C2').x);
-  assert.ok(positions.get(feature).x < positions.get(main).x);
-  assert.ok(positions.get(merge).x > positions.get(feature).x && positions.get(merge).x < positions.get(main).x);
+  assert.equal(positions.get(main).y, positions.get('C3').y);
+  assert.equal(positions.get(feature).y, positions.get('C2').y);
+  assert.ok(positions.get(feature).y < positions.get(main).y);
+  assert.ok(positions.get(merge).y > positions.get(feature).y && positions.get(merge).y < positions.get(main).y);
   assert.equal(view.all().filter(e => e.attrs.class === 'commit-edge').length, 7);
   assert.deepEqual(sim.snapshot(), before);
 });
 
-test('分支长度不同或轮流追加提交时，已有提交链保持原列，切换 HEAD 不改变排列', () => {
+test('分支长度不同或轮流追加提交时，已有提交链保持原通道，切换 HEAD 不改变排列', () => {
   const view = renderer(false), sim = new Simulator('branches');
   const main = [commitFile(sim, 'main.txt', '1\n'), commitFile(sim, 'main.txt', '2\n'), commitFile(sim, 'main.txt', '3\n')];
   const before = view.graph.layout(sim.state).positions;
   run(sim, 'git switch bugFix'); const feature = [commitFile(sim, 'feature.txt', '1\n'), commitFile(sim, 'feature.txt', '2\n')];
   const layout = view.graph.layout(sim.state);
-  for (const id of main) assert.equal(layout.positions.get(id).x, layout.positions.get('C3').x);
-  for (const id of feature) assert.equal(layout.positions.get(id).x, layout.positions.get('C2').x);
-  for (const [id, point] of before) assert.equal(layout.positions.get(id).x, point.x);
+  for (const id of main) assert.equal(layout.positions.get(id).y, layout.positions.get('C3').y);
+  for (const id of feature) assert.equal(layout.positions.get(id).y, layout.positions.get('C2').y);
+  for (const [id, point] of before) assert.equal(layout.positions.get(id).y, point.y);
   run(sim, 'git switch main');
   assert.deepEqual(view.graph.layout(sim.state).positions, layout.positions);
 });
@@ -105,8 +136,8 @@ test('一条分支再次分叉时避开同层已有提交，多分支节点不�
   run(sim, 'git switch main'); commitFile(sim, 'main.txt', 'c\n');
   view.graph.draw(sim.state); const layout = view.graph.layout(sim.state), rows = new Map();
   for (const point of layout.positions.values()) {
-    assert.ok(point.x >= 100 && point.x <= layout.width - 100);
-    if (!rows.has(point.y)) rows.set(point.y, []); rows.get(point.y).push(point.x);
+    assert.ok(point.y >= 100 && point.y <= layout.height - 100);
+    if (!rows.has(point.x)) rows.set(point.x, []); rows.get(point.x).push(point.y);
   }
   for (const row of rows.values()) {
     row.sort((a, b) => a - b);
@@ -119,7 +150,7 @@ test('一条分支再次分叉时避开同层已有提交，多分支节点不�
   }
 });
 
-test('六场景及变基、远程合并后：每条边仍指向真实父提交，重新绘图与 fetch 不改变已有列位置', () => {
+test('六场景及变基、远程合并后：每条边仍指向真实父提交，重新绘图与 fetch 不改变已有通道', () => {
   for (const scene of Object.keys(SCENES)) {
     const view = renderer(false), sim = new Simulator(scene);
     if (scene === 'branches') run(sim, 'git merge bugFix');
@@ -133,21 +164,21 @@ test('六场景及变基、远程合并后：每条边仍指向真实父提交�
     const edges = view.all().filter(e => e.attrs.class === 'commit-edge'); let index = 0;
     for (const commit of layout.commits) for (const parent of commit.parents) {
       const point = layout.positions.get(commit.id), to = layout.positions.get(parent);
-      assert.ok(to.y < point.y, scene + ': parent above child');
+      assert.ok(to.x < point.x, scene + ': parent left of child');
       const values = edges[index++].attrs.d.match(/-?\d+(?:\.\d+)?/g).map(Number);
       // 多条边分别连接圆周上的独立入口，同时校验确实落在对应子、父节点旁。
       const radius = Number(view.all().find(e => e.tag === 'circle').attrs.r);
       assert.ok(Math.abs(Math.hypot(values[0] - point.x, values[1] - point.y) - (radius + 1)) < .001);
       assert.ok(Math.abs(Math.hypot(values.at(-2) - to.x, values.at(-1) - to.y) - (radius + 6)) < .001);
-      assert.ok(values[1] < point.y && values.at(-1) > to.y);
+      assert.ok(values[0] < point.x && values.at(-2) > to.x);
       assert.equal(edges[index - 1].attrs['marker-end'], 'url(#parent-arrow)');
     }
     assert.equal(edges.length, index);
   }
   const view = renderer(false), sim = new Simulator('remote'), before = view.graph.layout(sim.state).positions;
   run(sim, 'git fetch');
-  // fetch 改变标签数量后允许增减纵向留白，但不应交换已有提交的左右列。
-  for (const [id, point] of before) assert.equal(view.graph.layout(sim.state).positions.get(id).x, point.x);
+  // fetch 改变标签数量后允许增减横向留白，但不应交换已有提交的上下通道。
+  for (const [id, point] of before) assert.equal(view.graph.layout(sim.state).positions.get(id).y, point.y);
 });
 
 /** 从实际 SVG 路径取样并检测线段穿框，独立于布局器的通道计算。 */
@@ -204,7 +235,7 @@ function assertLabelsClear(view, state) {
   assert.equal(JSON.stringify(state), before);
 }
 
-test('根提交挂 origin/main 且下方分为三支：标签与提交线、其他引用指针留有间距', () => {
+test('根提交挂 origin/main 且右侧分为三支：标签与提交线、其他引用指针留有间距', () => {
   const view = renderer(false), sim = new Simulator('basic');
   // 固定根提交上的远程引用，保留此布局回归用例，不依赖基础场景的预置历史长度。
   run(sim, 'git reset --hard C0');
@@ -231,7 +262,7 @@ test('六类场景和跨层合并：长名称、多层标签及 HEAD 说明均�
   assertLabelsClear(view, sim.state);
 });
 
-/** 按截图构造不等长分支；镜像历史确保绕行策略不偏向固定一侧。 */
+/** 按截图构造不等长分支；旋转后的镜像历史确保绕行策略不偏向固定一侧。 */
 function unevenMerge(longOnLeft) {
   const sim = new Simulator('basic');
   run(sim, 'git switch -c ' + (longOnLeft ? 'dev' : 'topic'));
@@ -254,14 +285,14 @@ function segmentsMeet([a, b], [c, d]) {
   return cross(a, b, c) * cross(a, b, d) <= epsilon && cross(c, d, a) * cross(c, d, b) <= epsilon;
 }
 
-for (const left of [false, true]) test('截图中的不等长分支合并与镜像：连线走内部短路径，无交叉或共享线段，左侧长链=' + left, () => {
+for (const left of [false, true]) test('不等长分支合并与镜像：连线走内部短路径，无交叉或共享线段，上侧长链=' + left, () => {
   const sim = unevenMerge(left), view = renderer(false), before = sim.snapshot();
   const layout = view.graph.layout(sim.state), merge = layout.objects[sim.headId()];
   const route = layout.edges.find(edge => edge.commit === merge.id && edge.parent === merge.parents[1]);
   const segments = pathSegments(route.path), child = layout.positions.get(merge.id), parent = layout.positions.get(merge.parents[1]);
-  const xMin = Math.min(child.x, parent.x) - 12, xMax = Math.max(child.x, parent.x) + 12;
-  assert.ok(segments.every(segment => segment.every(([x]) => x >= xMin && x <= xMax)), '跨层线应留在两个端点之间，避免绕到画布边缘');
-  assert.ok(sampledLength(segments) < child.y - parent.y + Math.abs(child.x - parent.x) + 60, '跨层线长度应接近必要的横纵距离');
+  const yMin = Math.min(child.y, parent.y) - 12, yMax = Math.max(child.y, parent.y) + 12;
+  assert.ok(segments.every(segment => segment.every(([, y]) => y >= yMin && y <= yMax)), '跨层线应留在两个端点之间，避免绕到画布边缘');
+  assert.ok(sampledLength(segments) < child.x - parent.x + Math.abs(child.y - parent.y) + 60, '跨层线长度应接近必要的横纵距离');
   const routes = layout.edges.map(edge => ({ edge, segments: pathSegments(edge.path) }));
   for (let i = 0; i < routes.length; i++) for (let j = i + 1; j < routes.length; j++) {
     assert.ok(!routes[i].segments.some(a => routes[j].segments.some(b => segmentsMeet(a, b))), `${routes[i].edge.commit}→${routes[i].edge.parent} 与 ${routes[j].edge.commit}→${routes[j].edge.parent} 不应交叉或贴合`);

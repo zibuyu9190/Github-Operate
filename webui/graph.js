@@ -1,9 +1,11 @@
 (function (root) {
   'use strict';
   const NS = 'http://www.w3.org/2000/svg';
-  const NODE_RADIUS = 19, LABEL_HEIGHT = 25, LABEL_GAP = 52, LABEL_ROW_GAP = 65;
+  const NODE_RADIUS = 19, LABEL_HEIGHT = 25, LABEL_GAP = 52;
   const EDGE_CLEARANCE = 32;
   const labelWidth = text => Math.max(54, [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 255 ? 11 : 6.8), 18));
+  // 本地分支预留星号宽度，切换 HEAD 只改变标识，不推动后续提交。
+  const referenceWidth = ref => labelWidth(ref.text + (ref.key.startsWith('local:') && !ref.active ? '*' : ''));
   const element = (name, attrs = {}, text) => {
     const node = document.createElementNS(NS, name);
     for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
@@ -86,7 +88,7 @@
       return refs;
     }
 
-    /** 连续提交继承父列；同层发生分叉时才让出间距，不按提交创建顺序重新左右排队。 */
+    /** 连续提交继承父通道；同层分叉时上下分开，不按提交创建顺序重新排队。 */
     columns(rows) {
       const columns = new Map();
       for (const row of rows) {
@@ -109,13 +111,24 @@
       return columns;
     }
 
-    /** 标签占用节点下方侧边区域；跨层边优先走内部空隙，仅遇到障碍物时绕行。 */
+    /** 时间从左向右，分支沿纵向通道展开；每层为正向文字标签预留实际宽度。 */
     layout(state) {
       const objects = { ...state.remote.commits, ...state.commits };
       const commits = Object.values(objects).sort((a, b) => a.order - b.order);
-      const depths = new Map(), rows = new Map(), positions = new Map(), refCounts = new Map(), exits = new Map();
+      const depths = new Map(), rows = new Map(), positions = new Map(), exits = new Map();
       const refs = this.references(state);
-      for (const ref of refs) refCounts.set(ref.id, (refCounts.get(ref.id) || 0) + 1);
+      const labelOffsets = new Map(), labelEnds = new Map(), byCommit = new Map();
+      for (const ref of refs) { if (!byCommit.has(ref.id)) byCommit.set(ref.id, []); byCommit.get(ref.id).push(ref); }
+      // 每两张标签分置通道上下方；多组标签沿时间轴排开，长名称也不挤占相邻分支。
+      for (const [id, group] of byCommit) {
+        let offset = 36;
+        for (let i = 0; i < group.length; i += 2) {
+          const pair = group.slice(i, i + 2);
+          for (const ref of pair) labelOffsets.set(ref.key, offset);
+          offset += Math.max(...pair.map(referenceWidth)) + 24;
+        }
+        labelEnds.set(id, offset);
+      }
       const depth = id => {
         if (!depths.has(id)) depths.set(id, objects[id].parents.length ? 1 + Math.max(...objects[id].parents.map(depth)) : 0);
         return depths.get(id);
@@ -124,48 +137,44 @@
       const layers = [...rows].sort((a, b) => a[0] - b[0]);
       const columns = this.columns(layers.map(([, row]) => row));
       const minColumn = Math.min(...columns.values()), maxColumn = Math.max(...columns.values()), centerColumn = (minColumn + maxColumn) / 2;
-      const widestLabel = Math.max(54, ...refs.map(ref => labelWidth(ref.text)));
-      // 相邻节点的左右标签均须留在各自通道内，长分支名不能压到另一条提交链。
-      const columnGap = Math.max(280, 2 * (widestLabel + LABEL_GAP) + 32), padding = Math.max(120, widestLabel + LABEL_GAP + 24);
-      const width = Math.max(760, (maxColumn - minColumn) * columnGap + padding * 2);
-      let y = 65, height = 350;
+      const laneGap = 250, padding = 120;
+      const height = Math.max(270, (maxColumn - minColumn) * laneGap + padding * 2);
+      let x = 60, width = 540;
       for (const [, row] of layers) {
         row.forEach(commit => {
-          const x = width / 2 + (columns.get(commit.id) - centerColumn) * columnGap;
+          const y = height / 2 + (columns.get(commit.id) - centerColumn) * laneGap;
           positions.set(commit.id, { x, y });
         });
-        const labelRows = Math.ceil(Math.max(...row.map(commit => refCounts.get(commit.id) || 0)) / 2);
-        const clearance = labelRows ? 45 + (labelRows - 1) * LABEL_ROW_GAP + LABEL_HEIGHT + 45 : NODE_RADIUS + 35;
-        exits.set(depth(row[0].id), y + clearance - 10);
-        height = Math.max(height, y + clearance);
-        y += Math.max(145, clearance + NODE_RADIUS + 20 + EDGE_CLEARANCE);
+        const clearance = Math.max(NODE_RADIUS + 26, ...row.map(commit => labelEnds.get(commit.id) || 0));
+        exits.set(depth(row[0].id), x + clearance);
+        width = Math.max(width, x + clearance + 30);
+        x += Math.max(112, clearance + NODE_RADIUS + 12 + EDGE_CLEARANCE);
       }
-      const labels = this.labelPositions(refs, positions, width);
-      const edges = this.routeEdges(commits, positions, depths, exits, labels, width);
+      const labels = this.labelPositions(refs, positions, labelOffsets);
+      const edges = this.routeEdges(commits, positions, depths, exits, labels, height);
       return { commits, objects, positions, width, height, edges, labels };
     }
 
     /** 绘制和避障共用标签尺寸，连 HEAD 说明的下沿也保留空间。 */
-    labelPositions(refs, positions, width) {
+    labelPositions(refs, positions, offsets) {
       const counters = new Map();
       return refs.map(ref => {
         const point = positions.get(ref.id), index = counters.get(ref.id) || 0;
         counters.set(ref.id, index + 1);
-        const labelW = labelWidth(ref.text), left = index % 2 === 0;
-        const x = left ? Math.max(8, point.x - labelW - LABEL_GAP) : Math.min(width - labelW - 8, point.x + LABEL_GAP);
-        const y = point.y + 45 + Math.floor(index / 2) * LABEL_ROW_GAP;
-        return { ref, point, left, x, y, width: labelW, height: ref.active ? 45 : LABEL_HEIGHT };
+        const labelW = referenceWidth(ref), above = index % 2 === 0, height = ref.active ? LABEL_HEIGHT + 20 : LABEL_HEIGHT;
+        const x = point.x + offsets.get(ref.key), y = above ? point.y - LABEL_GAP - height : point.y + LABEL_GAP;
+        return { ref, point, above, x, y, width: labelW, height };
       });
     }
 
     /** 先铺相邻层提交链，再为跨层边选路径；长度、交叉及重叠共同参与评分，顺序与 HEAD 无关。 */
-    routeEdges(commits, positions, depths, exits, labels, width) {
+    routeEdges(commits, positions, depths, exits, labels, height) {
       const edges = commits.flatMap(commit => commit.parents.map(parent => ({ commit: commit.id, parent, span: depths.get(commit.id) - depths.get(parent) })));
       const ports = (key, opposite) => {
         const groups = new Map(), offsets = new Map();
         for (const edge of edges) { if (!groups.has(edge[key])) groups.set(edge[key], []); groups.get(edge[key]).push(edge); }
         for (const group of groups.values()) {
-          group.sort((a, b) => positions.get(a[opposite]).x - positions.get(b[opposite]).x || positions.get(a[opposite]).y - positions.get(b[opposite]).y);
+          group.sort((a, b) => positions.get(a[opposite]).y - positions.get(b[opposite]).y || positions.get(a[opposite]).x - positions.get(b[opposite]).x);
           group.forEach((edge, i) => offsets.set(edge, group.length === 1 ? 0 : (2 * i / (group.length - 1) - 1) * 9));
         }
         return offsets;
@@ -176,20 +185,20 @@
       const routed = [];
       for (const edge of [...edges].sort((a, b) => a.span - b.span)) {
         const point = positions.get(edge.commit), to = positions.get(edge.parent), startOffset = starts.get(edge), endOffset = ends.get(edge);
-        const start = { x: point.x + startOffset, y: point.y - Math.sqrt((NODE_RADIUS + 1) ** 2 - startOffset ** 2) };
-        const end = { x: to.x + endOffset, y: to.y + Math.sqrt((NODE_RADIUS + 6) ** 2 - endOffset ** 2) };
+        const start = { x: point.x - Math.sqrt((NODE_RADIUS + 1) ** 2 - startOffset ** 2), y: point.y + startOffset };
+        const end = { x: to.x + Math.sqrt((NODE_RADIUS + 6) ** 2 - endOffset ** 2), y: to.y + endOffset };
         const exit = exits.get(depths.get(edge.parent));
         const candidates = [0.5, .18, .82].map(ratio => {
-          const bend = exit + (start.y - exit) * ratio;
-          return routePath([['M', start.x, start.y], ['C', start.x, bend, end.x, bend, end.x, exit], ['L', end.x, end.y]]);
+          const bend = exit + (start.x - exit) * ratio;
+          return routePath([['M', start.x, start.y], ['C', bend, start.y, bend, end.y, exit, end.y], ['L', end.x, end.y]]);
         });
         const blockers = [...obstacles, ...nodeBoxes.filter(box => box.id !== edge.commit && box.id !== edge.parent)];
         if (edge.span > 1) {
-          const incoming = (exits.get(depths.get(edge.commit) - 1) + start.y) / 2;
-          const lanes = new Set([start.x, end.x, (start.x + end.x) / 2, 12, width - 12]);
+          const incoming = (exits.get(depths.get(edge.commit) - 1) + start.x) / 2;
+          const lanes = new Set([start.y, end.y, (start.y + end.y) / 2, 12, height - 12]);
           // 就近尝试障碍物两侧，不再把所有跨层边赶到画布同一侧。
-          for (const box of blockers) for (const lane of [box.x - 14, box.x + box.width + 14]) if (lane >= 12 && lane <= width - 12) lanes.add(lane);
-          for (const lane of lanes) candidates.push(roundedRoute([start, { x: start.x, y: incoming }, { x: lane, y: incoming }, { x: lane, y: exit }, { x: end.x, y: exit }, end]));
+          for (const box of blockers) for (const lane of [box.y - 14, box.y + box.height + 14]) if (lane >= 12 && lane <= height - 12) lanes.add(lane);
+          for (const lane of lanes) candidates.push(roundedRoute([start, { x: incoming, y: start.y }, { x: incoming, y: lane }, { x: exit, y: lane }, { x: exit, y: end.y }, end]));
         }
         let best, bestScore = Infinity;
         for (const candidate of candidates) {
@@ -214,7 +223,7 @@
       this.state = state;
       const svg = this.svg, layout = this.layout(state), positions = layout.positions;
       svg.replaceChildren(); svg.setAttribute('viewBox', '0 0 ' + layout.width + ' ' + layout.height);
-      const title = element('title', {}, 'Git 提交图。箭头指向父提交；亮绿色标签表示当前分支。'); svg.append(title);
+      const title = element('title', {}, 'Git 提交图。旧提交在左，新提交在右；箭头向左指向父提交，亮绿色标签表示当前分支。'); svg.append(title);
       const defs = element('defs');
       for (const [id, color] of [['parent-arrow', '#294a60'], ['label-arrow', '#fff']]) {
         const marker = element('marker', { id, markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto', markerUnits: 'userSpaceOnUse' });
@@ -248,12 +257,13 @@
         svg.append(group);
       }
       const tagPositions = new Map();
-      for (const { ref, point, left, x, y, width } of layout.labels) {
+      for (const { ref, point, above, x, y, width, height } of layout.labels) {
         const group = element('g', { class: 'branch-tag', 'data-ref': ref.key, transform: `translate(${x} ${y})` });
-        const endX = point.x - x + (left ? -16 : 16), endY = point.y - y + 10;
-        // 下层指针从外侧绕行，避免穿过同一节点的上层分支标签。
-        const startX = left ? width - 5 : 5, bendX = point.x - x + (left ? -34 : 34);
-        group.append(element('path', { class: 'branch-pointer', d: `M ${startX} 0 Q ${bendX} 0 ${endX} ${endY}`, 'marker-end': 'url(#label-arrow)' }));
+        const endX = point.x - x + 10, endY = point.y - y + (above ? -16 : 16);
+        // 指针从标签朝向节点的一侧接入，沿通道内侧绕开同节点的其他标签。
+        const startY = above ? LABEL_HEIGHT - 5 : 5, bendY = point.y - y + (above ? -32 : 32);
+        const innerY = above ? height + 12 : -12;
+        group.append(element('path', { class: 'branch-pointer', d: `M 0 ${startY} L -12 ${innerY} Q -12 ${bendY} ${endX} ${endY}`, 'marker-end': 'url(#label-arrow)' }));
         group.append(element('rect', { width, height: LABEL_HEIGHT, rx: 7, fill: ref.active ? '#00fa8f' : ref.color, 'stroke-dasharray': ref.small ? '4 2' : 'none' }));
         group.append(element('text', { x: width / 2, y: 17, 'text-anchor': 'middle' }, ref.text));
         if (ref.active) group.append(element('text', { class: 'head-caption', x: width / 2, y: 39, 'text-anchor': 'middle' }, state.head.branch ? 'HEAD' : '分离状态'));
@@ -265,12 +275,14 @@
         }
       }
       this.previous = positions; this.previousTags = tagPositions;
-      this.resize(layout);
+      this.resize();
     }
 
-    resize(layout = this.layout(this.state)) {
-      this.svg.style.width = (this.zoom * 100) + '%';
-      this.svg.style.height = Math.max(this.svg.parentElement.clientHeight, layout.height * .88) * this.zoom + 'px';
+    resize() {
+      const parent = this.svg.parentElement, width = parent.clientWidth || 600, height = parent.clientHeight || 240;
+      // viewBox 等比适应可见画布；缩放同步扩展两个轴，长历史可以横向滚动查看。
+      this.svg.style.width = width * this.zoom + 'px';
+      this.svg.style.height = height * this.zoom + 'px';
     }
 
     setZoom(value) { this.zoom = Math.max(.6, Math.min(2.5, value)); this.resize(); }
