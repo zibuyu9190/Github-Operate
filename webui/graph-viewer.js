@@ -449,29 +449,32 @@
     return summary;
   }
 
-  /** 常驻信息始终指向我的本地仓库；协作者视图也不会把本地 stash 误标为远端数据。 */
+  /** 常驻信息跟随当前身份，stash 与上游数量只读取该身份的本地仓库。 */
   class StatusView {
     constructor(panel, onCommand) {
       this.panel = panel;
       const make = (tag, className) => { const item = document.createElement(tag); item.className = className; return item; };
       this.root = make('section', 'repository-status'); this.root.id = 'repository-status'; this.root.setAttribute('aria-label', '本地仓库状态');
-      const header = make('div', 'repository-status-heading'), label = make('strong', ''); label.textContent = '我的本地仓库';
+      const header = make('div', 'repository-status-heading'); this.label = make('strong', ''); this.label.textContent = '我的本地仓库';
       this.branch = make('span', 'repository-status-branch');
       this.stash = make('button', 'repository-status-stash'); this.stash.type = 'button';
       this.stash.title = '点击填入 git stash list，再按 Enter 查看临时保存记录';
       this.stash.addEventListener('click', () => onCommand('git stash list'));
-      header.append(label, this.branch, this.stash);
+      header.append(this.label, this.branch, this.stash);
       this.upstream = make('p', 'repository-status-upstream'); this.upstream.setAttribute('aria-live', 'polite');
       this.sync = make('p', 'repository-status-sync');
       this.root.append(header, this.upstream, this.sync); panel.querySelector('.panel-heading').after(this.root);
     }
 
-    update(state) {
+    update(state, actor = 'local') {
       const summary = repositorySummary(state);
+      const remote = actor === 'remote';
+      this.label.textContent = remote ? '协作者本地仓库' : '我的本地仓库';
+      this.root.setAttribute('aria-label', remote ? '协作者本地仓库状态' : '本地仓库状态');
       this.root.setAttribute('data-state', summary.mode);
       this.branch.textContent = summary.branch ? '分支：' + summary.branch : '分离 HEAD：' + summary.id;
-      this.stash.textContent = '本地 Stash：' + summary.stashes;
-      this.stash.setAttribute('aria-label', '查看本地 Stash，共 ' + summary.stashes + ' 份');
+      this.stash.textContent = (remote ? '协作者' : '本地') + ' Stash：' + summary.stashes;
+      this.stash.setAttribute('aria-label', '查看' + (remote ? '协作者' : '本地') + ' Stash，共 ' + summary.stashes + ' 份');
       const texts = {
         detached: ['上游：分离 HEAD，无当前分支', '可以先创建或切换到本地分支，再关联上游。'],
         unset: ['上游：未设置', '首次推送并关联：git push -u origin ' + summary.branch],

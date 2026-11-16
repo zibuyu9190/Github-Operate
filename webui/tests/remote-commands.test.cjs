@@ -79,7 +79,7 @@ test('协作者空提交、非法语法、未支持命令和过长说明均不�
   const sim = new Simulator(), draft = workspace(sim);
   assert.equal(draft.execute(sim, 'git commit -m "空提交"').ok, false);
   draft.editFile('hello.txt', '尚未提交\n'); run(sim, draft, 'git add .');
-  for (const command of ['git add missing.txt', 'git add hello.txt missing.txt', 'git commit', 'git commit --amend -m "修改历史"', 'git push origin other', 'git pull origin other', 'git switch main', 'git reset --hard', 'git stash', 'git commit -m "未闭合', 'git add . && git commit -m "组合"', 'git commit -m "' + '长'.repeat(201) + '"']) {
+  for (const command of ['git add missing.txt', 'git add hello.txt missing.txt', 'git commit', 'git commit --amend --unknown', 'git push origin other', 'git pull origin other', 'git switch missing', 'git reset --unknown', 'git stash --unknown', 'git commit -m "未闭合', 'git add . && git commit -m "组合"', 'git commit -m "' + '长'.repeat(201) + '"']) {
     const before = sim.snapshot(), buffer = structuredClone(draft);
     assert.equal(draft.execute(sim, command).ok, false, command);
     assert.deepEqual(sim.snapshot(), before, command); assert.deepEqual(structuredClone(draft), buffer, command);
@@ -119,17 +119,19 @@ test('协作者推荐和补全区分 commit 与 push，使用自己的文件和�
   const choices = input => complete(input, input.length, context);
   assert.ok(choices('git add ').some(item => item.label === 'peer-only.txt'));
   assert.ok(!choices('git add ').some(item => item.label === 'local-only.txt'));
-  assert.ok(choices('git pu').some(item => item.label === 'push')); assert.deepEqual(choices('git switch '), []);
-  assert.ok(!choices('git commit --').some(item => item.label === '--amend'));
-  assert.deepEqual(choices('git commit --amend '), []);
+  assert.ok(choices('git pu').some(item => item.label === 'push')); assert.ok(choices('git switch ').some(item => item.label === 'main'));
+  assert.ok(choices('git commit --').some(item => item.label === '--amend'));
+  assert.ok(choices('git commit --amend ').some(item => item.label === '--no-edit'));
   assert.match(usage('git commit', context), /协作者本地.*git push/);
   assert.ok(recommend(context).some(item => item.command === 'git add peer-only.txt'));
-  assert.ok(!recommend(context).some(item => /push|pull|stash|switch/.test(item.command)));
+  assert.ok(recommend(context).some(item => item.command.startsWith('git stash push')));
   run(sim, draft, 'git add .'); context = draft.commandContext(sim);
   assert.ok(recommend(context).some(item => item.command.startsWith('git commit')));
   sim.simulateRemote(); context = draft.commandContext(sim);
   assert.ok(recommend(context).some(item => item.command.startsWith('git commit')));
   run(sim, draft, 'git commit -m "协作内容"'); context = draft.commandContext(sim);
+  assert.ok(recommend(context).some(item => item.command.startsWith('git fetch')));
+  run(sim, draft, 'git fetch'); context = draft.commandContext(sim);
   assert.ok(recommend(context).some(item => item.command.startsWith('git pull')));
   assert.ok(!recommend(context).some(item => item.command === 'git push'));
 });

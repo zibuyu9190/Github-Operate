@@ -303,6 +303,80 @@ for (const mode of ['--no-rebase', '--rebase']) test('真实 Git 对照：协作
   f.command('pull', '--no-rebase'); f.assertState();
 });
 
+/** 真实第二份克隆与协作者状态对照，同时检查我的仓库不会被协作者命令改写。 */
+function collaboratorFixture(t) {
+  const f = fixture(t), remote = path.resolve(f.directory, '../remote.git'), directory = path.resolve(f.directory, '../collaborator');
+  f.git(['init', '--bare', '-b', 'main', remote]); f.git(['remote', 'add', 'origin', remote]); f.command('push', '-u', 'origin', 'main'); f.git(['clone', remote, directory]);
+  const peer = new RemoteWorkspace('main', f.sim.state.remote.commits[f.sim.state.remote.branches.main], f.sim.state.remote);
+  const execute = (...args) => {
+    const mine = f.sim.snapshot(), result = peer.execute(f.sim, 'git ' + args.map(arg => JSON.stringify(arg)).join(' ')), actual = f.git(args, true, directory);
+    assert.equal(result.ok && !result.conflict && !result.paused, actual.status === 0, args.join(' ') + '\n' + result.output + actual.stderr);
+    for (const key of Object.keys(mine).filter(key => !['remote', 'nextId'].includes(key))) assert.deepEqual(f.sim.state[key], mine[key], key);
+    if (args[0] !== 'push') assert.deepEqual(f.sim.state.remote, mine.remote);
+    return result;
+  };
+  const edit = (file, text) => { peer.editFile(file, text); fs.writeFileSync(path.join(directory, file), text, 'utf8'); };
+  const compare = () => {
+    const git = args => f.git(args, false, directory).stdout;
+    const actualBranch = f.git(['symbolic-ref', '--quiet', '--short', 'HEAD'], true, directory);
+    assert.equal(peer.branch, actualBranch.status === 0 ? actualBranch.stdout.trim() : null);
+    const names = git(['ls-files', '-z']).split('\0').filter(Boolean);
+    assert.deepEqual(peer.index, Object.fromEntries(names.map(file => [file, git(['show', ':' + file])])));
+    const cache = new Map();
+    const actualShape = id => {
+      if (!cache.has(id)) {
+        const files = git(['ls-tree', '-rz', '--name-only', id]).split('\0').filter(Boolean);
+        const tree = Object.fromEntries(files.map(file => [file, git(['show', id + ':' + file])]));
+        const parents = git(['rev-list', '--parents', '-n', '1', id]).trim().split(' ').slice(1);
+        cache.set(id, { tree, parents: parents.map(actualShape) });
+      }
+      return cache.get(id);
+    };
+    const simulatedShape = id => ({ tree: peer.commits[id].tree, parents: peer.commits[id].parents.map(simulatedShape) });
+    for (const [branch, id] of Object.entries(peer.branches)) assert.deepEqual(simulatedShape(id), actualShape(git(['rev-parse', branch]).trim()), branch);
+    assert.deepEqual(peer.base, actualShape(git(['rev-parse', 'HEAD']).trim()).tree);
+    const work = {};
+    const scan = relative => {
+      for (const entry of fs.readdirSync(path.join(directory, relative), { withFileTypes: true })) {
+        if (entry.name === '.git') continue;
+        const file = (relative ? relative + '/' : '') + entry.name;
+        if (entry.isDirectory()) scan(file); else work[file] = fs.readFileSync(path.join(directory, file), 'utf8');
+      }
+    };
+    scan(''); assert.deepEqual(work, peer.work);
+    assert.equal(peer.stashes.length, git(['stash', 'list']).trim().split('\n').filter(Boolean).length);
+    assert.deepEqual(Object.keys(peer.tags).sort(), git(['tag']).trim().split('\n').filter(Boolean).sort());
+  };
+  return { ...f, peer, execute, edit, compare };
+}
+
+test('真实 Git 对照：协作者跨分支 stash、修订、reset、标签、摘取与反向提交', t => {
+  const f = collaboratorFixture(t);
+  f.execute('switch', '-c', 'dev'); f.edit('peer.txt', '初版\n'); f.execute('add', '.'); f.execute('commit', '-m', '协作者开发');
+  f.edit('peer.txt', '修订\n'); f.execute('add', '.'); f.execute('commit', '--amend', '--no-edit'); f.execute('tag', '-a', 'v1.0', '-m', '版本');
+  f.edit('peer.txt', '临时编辑\n'); f.execute('stash', 'push', '-u', '-m', '暂存开发'); f.execute('switch', 'main'); f.execute('switch', '-'); f.execute('stash', 'pop');
+  f.execute('restore', 'peer.txt'); f.execute('mv', 'peer.txt', 'renamed.txt'); f.execute('commit', '-m', '改名');
+  f.execute('reset', '--soft', 'HEAD~1'); f.compare(); f.execute('reset', '--mixed', 'HEAD'); f.execute('reset', '--hard', 'HEAD');
+  // mixed 之后的新路径成为未跟踪文件，与真实 Git 一样由 hard 保留。
+  assert.equal(f.peer.work['renamed.txt'], '修订\n'); assert.equal(f.peer.index['renamed.txt'], undefined);
+  // 教学版整合命令要求整个工作区干净，先把未跟踪文件也存入 stash 后继续对照。
+  f.execute('stash', 'push', '-u', '-m', '保存未跟踪文件');
+  f.execute('switch', 'main'); f.execute('cherry-pick', 'v1.0'); f.execute('revert', 'HEAD'); f.execute('tag', '-d', 'v1.0');
+  f.execute('switch', '--detach', 'HEAD~1'); f.compare(); f.execute('switch', '-c', 'rescued'); f.execute('branch', '-m', 'saved'); f.execute('push', '-u', 'origin', 'saved'); f.compare();
+});
+
+for (const operation of ['merge', 'rebase']) test('真实 Git 对照：协作者多分支 ' + operation + ' 与远程跟踪分支切换', t => {
+  const f = collaboratorFixture(t);
+  f.execute('switch', '-c', 'dev'); f.edit('peer.txt', 'dev 文件\n'); f.execute('add', '.'); f.execute('commit', '-m', 'dev 提交');
+  f.execute('switch', 'main'); f.edit('main.txt', 'main 文件\n'); f.execute('add', '.'); f.execute('commit', '-m', 'main 提交');
+  if (operation === 'merge') f.execute('merge', '--no-ff', 'dev');
+  else { f.execute('switch', 'dev'); f.execute('rebase', 'main'); }
+  f.compare(); f.execute('push', '-u', 'origin', f.peer.branch);
+  f.command('switch', '-c', 'teammate');
+  f.command('push', '-u', 'origin', 'teammate');
+  f.execute('fetch'); f.execute('switch', 'teammate'); f.compare();
+});
+
 test('真实 Git 对照：cherry-pick 只摘取指定补丁，多提交顺序一致', t => {
   const f = fixture(t); f.command('switch', '-c', 'source');
   f.edit('excluded.txt', '不摘取\n'); f.commit('来源一'); f.edit('selected.txt', '摘取\n'); f.commit('来源二');

@@ -113,12 +113,15 @@
     return text.replace(/\r\n/g, '\n');
   }
 
-  /** 每个协作者分支拥有独立提交、工作区和暂存区；只有 push 才发布到共享远程。 */
+  /** 协作者是独立的多分支仓库；工作区、暂存区、stash 和 HEAD 随同一套命令语义变化。 */
   class RemoteWorkspace {
-    constructor(branch, commit) {
+    constructor(branch, commit, remote = null) {
       this.branch = branch; this.baseId = commit.id; this.base = clone(commit.tree);
       this.work = clone(commit.tree); this.index = clone(commit.tree);
-      this.commits = { [commit.id]: clone(commit) }; this.tracking = { [branch]: commit.id }; this.pending = null;
+      // 只在建立协作者仓库时复制远程；之后必须 fetch，不能通过查看或切分支偷取新历史。
+      this.commits = clone(remote?.commits || { [commit.id]: commit }); this.tracking = clone(remote?.branches || { [branch]: commit.id });
+      this.branches = { [branch]: commit.id }; this.head = { branch, id: null }; this.upstreams = { [branch]: branch };
+      this.tags = {}; this.stashes = []; this.reflog = []; this.previousCheckout = null; this.pending = null;
     }
     editFile(path, text) {
       validPath(path); const normalized = normalizeFileText(text);
@@ -133,10 +136,14 @@
     stage(paths) {
       const targets = paths === '.' ? keys(this.base, this.index, this.work) : paths;
       if (!Array.isArray(targets) || targets.some(path => !keys(this.base, this.index, this.work).includes(path))) throw new Error('请选择存在的文件或待暂存的删除。');
-      for (const path of targets) put(this.index, path, value(this.work, path));
+      for (const path of targets) {
+        put(this.index, path, value(this.work, path));
+        if (this.pending) this.pending.unresolved = this.pending.unresolved.filter(item => item !== path);
+      }
+      if (this.pending?.type === 'stash' && !this.pending.unresolved.length) this.pending = null;
     }
     fileStatus() {
-      return keys(this.base, this.index, this.work).map(path => ({ path, staged: value(this.base, path) !== value(this.index, path), unstaged: value(this.index, path) !== value(this.work, path), deleted: !own(this.work, path), conflict: Boolean(this.pending?.unresolved.includes(path)) }));
+      return keys(this.base, this.index, this.work).map(path => ({ path, staged: value(this.base, path) !== value(this.index, path), unstaged: value(this.index, path) !== value(this.work, path), untracked: !own(this.base, path) && !own(this.index, path) && own(this.work, path), deleted: !own(this.work, path), conflict: Boolean(this.pending?.unresolved.includes(path)) }));
     }
     isClean() { return same(this.base, this.index) && same(this.index, this.work); }
     /** 复用同一引擎的提交、推送和整合语义，不借用“我的本地”的对象或引用。 */
@@ -147,9 +154,9 @@
       const visit = id => { if (!objects[id]) throw new Error('协作者提交历史不完整，请重新载入远程。'); commits[id] = clone(objects[id]); objects[id].parents.forEach(parent => { if (!own(commits, parent)) visit(parent); }); };
       visit(this.baseId); Object.values(this.tracking).forEach(visit);
       repository.state = {
-        commits, branches: { [this.branch]: this.baseId },
-        head: { branch: this.branch, id: null }, index: clone(this.index), work: clone(this.work),
-        tags: {}, tracking: clone(this.tracking), upstreams: { [this.branch]: this.branch }, pending: clone(this.pending), stashes: [], reflog: [], previousCheckout: null,
+        commits, branches: clone(this.branches),
+        head: clone(this.head), index: clone(this.index), work: clone(this.work),
+        tags: clone(this.tags), tracking: clone(this.tracking), upstreams: clone(this.upstreams), pending: clone(this.pending), stashes: clone(this.stashes), reflog: clone(this.reflog), previousCheckout: clone(this.previousCheckout),
         remote: clone(sim.state.remote), nextId: sim.state.nextId
       };
       return repository;
@@ -157,8 +164,10 @@
 
     commandContext(sim) {
       const repository = this.commandRepository(sim);
-      const actual = sim.state.remote.branches[this.branch], local = repository.ancestors(this.baseId), remote = repository.ancestors(actual, sim.state.remote.commits);
-      return { mode: 'remote', state: repository.state, files: repository.fileStatus(), stale: this.tracking[this.branch] !== actual,
+      const upstream = this.upstreams[this.branch], destination = upstream || this.branch;
+      const actual = sim.state.remote.branches[destination], local = repository.ancestors(this.baseId), remote = repository.ancestors(actual, sim.state.remote.commits);
+      return { mode: 'remote', state: repository.state, files: repository.fileStatus(), upstream, actual,
+        stale: Object.keys(sim.state.remote.branches).some(branch => this.tracking[branch] !== sim.state.remote.branches[branch]),
         ahead: [...local].filter(id => !remote.has(id)).length, behind: [...remote].filter(id => !local.has(id)).length };
     }
 
@@ -167,24 +176,21 @@
       const before = sim.snapshot();
       try {
         const command = Commands.parse(input);
-        const continuation = ['merge', 'rebase'].includes(command.name) && ['continue', 'abort'].includes(command.action);
-        if ((!['status', 'log', 'show', 'diff', 'add', 'restore', 'commit', 'fetch', 'pull', 'push'].includes(command.name) && !continuation) || command.amend) {
-          throw new Error('协作者模式支持 status、log、show、diff、add、restore、commit（含 -a）、fetch、pull、push，以及 pull 冲突后的 merge/rebase --continue 或 --abort；暂不支持切换分支或 --amend。');
-        }
-        if (command.branch && command.branch !== this.branch) throw new Error('请先在协作者分支选择框切换到 ' + command.branch + '，再执行此命令。');
-        if (command.name === 'commit' && (!command.message?.trim() || command.message.length > 200)) throw new Error('请填写提交说明，最多 200 个字符。');
-        if (!own(sim.state.remote.branches, this.branch)) throw new Error('所选远程分支不存在，请先在本地 push 或选择其他远程分支。');
+        if (command.name === 'commit' && command.message !== null && command.message.length > 200) throw new Error('请填写提交说明，最多 200 个字符。');
         const repository = this.commandRepository(sim), result = repository.execute(input);
         if (!result.ok) return { ...result, before, after: before };
-        if (!['status', 'log', 'show', 'diff'].includes(command.name)) {
+        const readOnly = ['status', 'log', 'show', 'diff', 'remote', 'reflog'].includes(command.name) || (['branch', 'tag', 'stash'].includes(command.name) && command.action === 'list');
+        if (!readOnly) {
           this.baseId = repository.headId(); this.base = clone(repository.headTree());
           this.index = clone(repository.state.index); this.work = clone(repository.state.work);
           this.commits = clone(repository.state.commits); this.tracking = clone(repository.state.tracking); this.pending = clone(repository.state.pending);
+          this.head = clone(repository.state.head); this.branch = this.head.branch;
+          for (const key of ['branches', 'upstreams', 'tags', 'stashes', 'reflog', 'previousCheckout']) this[key] = clone(repository.state[key]);
           sim.state.nextId = repository.state.nextId;
         }
         if (command.name === 'push') sim.state.remote = clone(repository.state.remote);
-        return { ...result, actor: 'remote', branch: this.branch, commitId: command.name === 'commit' ? this.baseId : undefined,
-          output: '模拟协作者 · 本地 ' + this.branch + '\n' + result.output,
+        return { ...result, actor: 'remote', branch: command.name === 'push' ? command.branch || this.upstreams[this.branch] || this.branch : this.branch, commitId: command.name === 'commit' ? this.baseId : undefined,
+          output: '模拟协作者 · 本地 ' + (this.branch || '分离 HEAD ' + this.baseId) + '\n' + result.output,
           explanation: command.name === 'commit' ? '协作者已提交到自己的本地仓库，尚未推送。执行 git push 后才会更新共享远程；你的本地需 fetch / pull 获取。' : '此命令操作协作者仓库。' + result.explanation,
           graphBefore: result.before, graphAfter: result.after, before, after: sim.snapshot() };
       } catch (error) {
@@ -604,6 +610,10 @@
         if (own(this.state.branches, c.ref)) throw new Error('分支已经存在。');
         this.state.branches[c.ref] = this.headId(); this.state.head = { branch: c.ref, id: null };
       } else {
+        // 与单一 origin 的常见 Git 配置一致：已有同名跟踪引用时可创建并切换本地分支。
+        if (!c.detach && !own(this.state.branches, c.ref) && own(this.state.tracking, c.ref)) {
+          this.state.branches[c.ref] = this.state.tracking[c.ref]; this.state.upstreams[c.ref] = c.ref;
+        }
         const id = this.resolve(c.ref), isBranch = !c.detach && own(this.state.branches, c.ref);
         if (c.name === 'switch' && !isBranch && !c.detach) throw new Error('switch 需要本地分支名；查看提交请用 switch --detach 或 checkout。');
         const old = this.headTree(), target = this.state.commits[id].tree;
