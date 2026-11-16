@@ -19,6 +19,7 @@
   const labels = ['编辑与提交', '分叉与汇合', '解决同一行冲突', '改变提交的基点', '理解三种模式', '本地与远程同步'];
   const filePanel = $('files-title').closest('.files-panel');
   const repositoryStatus = new GitRepositoryBrowser.StatusView(filePanel, fillCommand);
+  const remoteSync = new GitRepositoryBrowser.SyncView($('remote-sync'));
   const terminalContext = node('div', 'terminal-context');
   const terminalModes = node('div', 'terminal-modes'); terminalModes.setAttribute('role', 'group'); terminalModes.setAttribute('aria-label', '选择命令执行身份');
   const terminalLocal = node('button', '', '我的本地'), terminalRemote = node('button', '', '模拟协作者');
@@ -236,7 +237,7 @@
     const previousRoute = lesson.scene === scene ? lesson.route : undefined;
     cancelReplay(); sim.loadScene(scene); selectedFile = 'hello.txt'; selectedCommit = null; remoteBranch = null; dirty = false; lastResult = null;
     editorMode = 'local'; localBuffer = ''; collaboratorSession = null; clearCommandHistory();
-    repositoryBrowser.reset();
+    repositoryBrowser.reset(); remoteSync.reset();
     lesson = new GitLessons.Practice(scene, sim.snapshot(), previousRoute);
     graph.previous = new Map(); graph.previousTags = new Map();
     const info = SCENES[scene], index = Object.keys(SCENES).indexOf(scene);
@@ -269,22 +270,9 @@
       const option = node('option', '', branch + '（仅本地，需先 push）'); option.value = branch; option.disabled = true; options.push(option);
     }
     if (!remoteBranch) { const option = node('option', '', workspace ? '分离 HEAD · ' + workspace.baseId : '暂无远程分支'); option.value = ''; option.disabled = true; options.unshift(option); }
-    $('remote-branch').replaceChildren(...options); $('remote-branch').value = remoteBranch || '';
-    terminalBranch.replaceChildren(...options.map(option => option.cloneNode(true))); terminalBranch.value = remoteBranch || ''; terminalBranch.disabled = !branches.length;
+    terminalBranch.replaceChildren(...options); terminalBranch.value = remoteBranch || ''; terminalBranch.disabled = !branches.length;
     remoteBranchSelect.replaceChildren(...options.map(option => option.cloneNode(true))); remoteBranchSelect.value = remoteBranch || ''; remoteBranchSelect.disabled = !branches.length;
-    $('remote-branch').disabled = !branches.length; $('remote-commit').disabled = !branches.length;
-    $('remote-commit').title = workspace ? '打开协作者本地仓库编辑区' : '先推送一个分支到虚拟远程';
-    document.querySelector('label[for="remote-branch"]').textContent = '协作者本地分支';
-    $('remote-branch-hint').replaceChildren(document.createTextNode('选择框与 git switch 共用切换保护；新远程分支需 fetch 后可见。'));
-    $('remote-refs').replaceChildren();
-    for (const [branch, id] of Object.entries(sim.state.remote.branches)) {
-      for (const [label, target] of [['远程实际 ' + branch, id], ['本地 origin/' + branch, sim.state.tracking[branch] || '尚未同步']]) {
-        const row = node('div', 'remote-ref'); row.append(node('span', '', label), node('b', '', target)); $('remote-refs').append(row);
-      }
-    }
-    for (const [branch, id] of Object.entries(workspace?.branches || {})) {
-      const row = node('div', 'remote-ref'); row.append(node('span', '', '协作者本地 ' + branch), node('b', '', id)); $('remote-refs').append(row);
-    }
+    remoteSync.update(graphState(), editorMode);
   }
 
   /** 暂存区以 HEAD 为基准展示行级增删；删除的文件仍保留在可选列表中。 */
@@ -673,11 +661,6 @@
       renderFiles(); message('已选择此版本，请检查内容，再 git add 并继续。');
     });
   }
-  $('remote-branch').addEventListener('change', () => selectRemoteBranch($('remote-branch').value));
-  $('remote-commit').addEventListener('click', () => {
-    switchEditorMode('remote'); filePanel.scrollIntoView({ block: 'start' }); $('file-editor').focus();
-    repositoryStatus.highlightCollaborator();
-  });
   $('replay').addEventListener('click', replay); $('restart').addEventListener('click', () => loadScene(sim.scene));
   $('help-button').addEventListener('click', () => $('help-dialog').showModal()); $('close-help').addEventListener('click', () => $('help-dialog').close());
   $('help-dialog').addEventListener('click', event => { if (event.target === $('help-dialog')) { const rect = $('help-dialog').getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) $('help-dialog').close(); } });

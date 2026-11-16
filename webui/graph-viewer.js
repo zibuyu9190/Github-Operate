@@ -521,7 +521,46 @@
     }
   }
 
-  const api = { Model, View, StatusView, repositorySummary, fileStats, listEntries, references, latestPathCommit, commitAge };
+  /** 只读对比共享远程与当前身份的跟踪引用；更新数据时保留用户的展开选择。 */
+  class SyncView {
+    constructor(panel) {
+      this.panel = panel; this.panel.open = false;
+      const doc = panel.ownerDocument || document;
+      this.make = (tag, text, className) => { const item = doc.createElement(tag); if (text !== undefined) item.textContent = text; if (className) item.className = className; return item; };
+      const make = this.make, summary = make('summary');
+      this.owner = make('span', '', 'remote-sync-owner');
+      summary.append(make('strong', '远程同步状态'), this.owner);
+      this.table = make('table');
+      const heading = make('tr'); this.trackingHeading = make('th');
+      for (const cell of [make('th', '分支'), make('th', '共享远程'), this.trackingHeading]) { cell.setAttribute('scope', 'col'); heading.append(cell); }
+      const head = make('thead'); head.append(heading); this.rows = make('tbody'); this.table.append(head, this.rows);
+      this.note = make('p', '', 'remote-sync-note');
+      this.panel.replaceChildren(summary, this.table, this.note);
+    }
+
+    update(state, actor = 'local') {
+      const make = this.make, owner = actor === 'remote' ? '协作者本地' : '我的本地';
+      this.owner.textContent = owner; this.trackingHeading.textContent = actor === 'remote' ? '协作者 origin/*' : '我的 origin/*';
+      this.table.setAttribute('aria-label', owner + '的远程同步状态');
+      this.note.textContent = 'origin/* 是' + owner + '保存的远程记录，fetch 后更新；push 更新共享远程，pull 进一步整合本地分支。';
+      this.rows.replaceChildren();
+      const branches = [...new Set([...Object.keys(state.remote.branches), ...Object.keys(state.tracking)])].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+      for (const branch of branches) {
+        const actual = own(state.remote.branches, branch) ? state.remote.branches[branch] : null;
+        const tracking = own(state.tracking, branch) ? state.tracking[branch] : null;
+        const row = make('tr'), name = make('th', branch); name.setAttribute('scope', 'row');
+        const remoteCell = make('td'), localCell = make('td');
+        remoteCell.append(make('code', actual || '不存在')); localCell.append(make('code', tracking || '尚未获取'));
+        if (actual !== tracking) localCell.append(make('span', '未同步', 'remote-sync-stale'));
+        row.append(name, remoteCell, localCell); this.rows.append(row);
+      }
+      if (!branches.length) { const row = make('tr'), cell = make('td', '暂无远程分支或跟踪记录。'); cell.colSpan = 3; row.append(cell); this.rows.append(row); }
+    }
+
+    reset() { this.panel.open = false; }
+  }
+
+  const api = { Model, View, StatusView, SyncView, repositorySummary, fileStats, listEntries, references, latestPathCommit, commitAge };
   if (typeof module !== 'undefined' && module.exports) module.exports = { RepositoryBrowser: api };
   else root.GitRepositoryBrowser = api;
 })(globalThis);
