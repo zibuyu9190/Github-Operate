@@ -2,6 +2,39 @@
 (function (root) {
   'use strict';
 
+  /** 复用模拟器的行编辑结果；独立累计新旧行号，前后各保留三行上下文并合并相邻片段。 */
+  function unifiedHunks(before, after) {
+    const original = (before || '').match(/[^\n]*\n|[^\n]+$/g) || [], rows = [];
+    let oldLine = 1, newLine = 1;
+    const append = (kind, text) => {
+      rows.push({ kind, text: text.replace(/\r?\n$/, ''), oldLine: kind === 'added' ? null : oldLine,
+        newLine: kind === 'removed' ? null : newLine, oldCursor: oldLine, newCursor: newLine, noNewline: !text.endsWith('\n') });
+      if (kind !== 'added') oldLine++;
+      if (kind !== 'removed') newLine++;
+    };
+    for (const change of root.GitSimulator.edits(before, after)) {
+      while (oldLine <= change.start) append('context', original[oldLine - 1]);
+      for (const text of original.slice(change.start, change.end)) append('removed', text);
+      for (const text of change.lines) append('added', text);
+    }
+    while (oldLine <= original.length) append('context', original[oldLine - 1]);
+    const ranges = [];
+    rows.forEach((row, index) => {
+      if (row.kind === 'context') return;
+      const start = Math.max(0, index - 3), end = Math.min(rows.length, index + 4), last = ranges.at(-1);
+      if (last && start <= last.end) last.end = Math.max(last.end, end);
+      else ranges.push({ start, end });
+    });
+    return ranges.map(({ start, end }) => {
+      const content = rows.slice(start, end), oldRows = content.filter(row => row.oldLine !== null), newRows = content.filter(row => row.newLine !== null);
+      // 空侧从插入/删除位置计数；新增文件必须显示 -0,0，删除文件则显示 +0,0。
+      const range = (number, count) => count === 1 ? String(number) : number + ',' + count;
+      const oldStart = oldRows.length ? oldRows[0].oldLine : content[0].oldCursor - 1;
+      const newStart = newRows.length ? newRows[0].newLine : content[0].newCursor - 1;
+      return { header: '@@ -' + range(oldStart, oldRows.length) + ' +' + range(newStart, newRows.length) + ' @@', rows: content };
+    });
+  }
+
   class GraphViewer {
     /** 主页面与放大图共用差异视图；合并提交以第一父提交为基准，新增/删除同时用文字和颜色标明。 */
     static renderCommit(container, commit, state) {
@@ -19,20 +52,35 @@
         // 文件名可能与对象原型属性同名，只读取快照中实际存在的文件。
         const textAt = (tree, path) => Object.prototype.hasOwnProperty.call(tree, path) ? tree[path] : undefined;
         const changed = [...new Set([...Object.keys(baseline), ...Object.keys(commit.tree)])].sort().filter(path => textAt(baseline, path) !== textAt(commit.tree, path));
-        container.append(make('p', 'commit-diff-legend', '本次改动 · ' + (parentId ? '相对第一父提交 ' + parentId : '相对空仓库') + ' · + 绿色新增 / − 红色删除'));
+        container.append(make('p', 'commit-diff-legend', '本次改动 · ' + (parentId ? '相对第一父提交 ' + parentId : '相对空仓库') + ' · 旧 / 新行号 · + 新增 / − 删除 · 白色为未修改上下文'));
         if (!changed.length) container.append(make('p', '', '本次提交没有文件内容变化。'));
         for (const path of changed) {
           const before = textAt(baseline, path), after = textAt(commit.tree, path);
           const section = make('div', 'commit-change');
           section.append(make('strong', 'commit-change-title', (before === undefined ? '新增' : after === undefined ? '删除' : '修改') + ' · ' + path));
-          const preview = make('pre', 'commit-diff'), original = (before || '').match(/[^\n]*\n|[^\n]+$/g) || [];
-          const changes = root.GitSimulator.edits(before, after);
-          for (const change of changes) {
-            preview.append(make('span', 'commit-diff-line commit-diff-hunk', '@@ 原文件第 ' + (change.start + 1) + ' 行 @@'));
-            for (const line of original.slice(change.start, change.end)) preview.append(make('span', 'commit-diff-line commit-diff-removed', '− ' + line.replace(/\n$/, '')));
-            for (const line of change.lines) preview.append(make('span', 'commit-diff-line commit-diff-added', '+ ' + line.replace(/\n$/, '')));
+          const preview = make('div', 'commit-diff'); preview.tabIndex = 0; preview.setAttribute('aria-label', path + ' 的提交差异');
+          const table = make('table', 'commit-diff-table'), head = make('thead', ''), heading = make('tr', ''), body = make('tbody', '');
+          ['旧行号', '新行号', '变化', '内容'].forEach((label, index) => {
+            const cell = make('th', index < 2 ? 'commit-diff-number' : index === 2 ? 'commit-diff-sign' : 'commit-diff-code', label);
+            cell.setAttribute('scope', 'col'); heading.append(cell);
+          });
+          head.append(heading); table.append(head, body); preview.append(table);
+          const hunks = unifiedHunks(before, after);
+          for (const hunk of hunks) {
+            const header = make('tr', 'commit-diff-hunk'), label = make('td', '', hunk.header); label.colSpan = 4; header.append(label); body.append(header);
+            for (const line of hunk.rows) {
+              const row = make('tr', 'commit-diff-row commit-diff-' + line.kind);
+              row.append(make('td', 'commit-diff-number', line.oldLine === null ? '' : String(line.oldLine)),
+                make('td', 'commit-diff-number', line.newLine === null ? '' : String(line.newLine)),
+                make('td', 'commit-diff-sign', line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''),
+                make('td', 'commit-diff-code', line.text));
+              body.append(row);
+              if (line.noNewline) {
+                const note = make('tr', 'commit-diff-note'), cell = make('td', '', '\\ 文件末尾没有换行'); cell.colSpan = 4; note.append(cell); body.append(note);
+              }
+            }
           }
-          if (!changes.length) preview.append(make('span', 'commit-diff-line', after === undefined ? '删除空文件' : '新增空文件'));
+          if (!hunks.length) preview.append(make('p', 'commit-diff-empty', after === undefined ? '删除空文件' : '新增空文件'));
           section.append(preview); container.append(section);
         }
       }

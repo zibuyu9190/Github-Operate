@@ -23,16 +23,30 @@ dialog.graph-viewer[open] { display: flex; flex-direction: column; }
 .graph-viewer-snapshot strong { display: block; margin-top: 12px; overflow-wrap: anywhere; }
 .graph-viewer-snapshot pre { margin: 7px 0; padding: 10px 12px; border-radius: 6px; background: #f3f7fa; font: 12px/1.7 Consolas, 'Microsoft YaHei', monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 
-/* 差异只显示本次变更的行；纯文本符号与文件状态让信息不依赖颜色。 */
+/* GitHub 风格统一差异：新旧行号独立计数，符号与上下文让信息不依赖颜色。 */
 #commit-content { max-height: 220px; }
 #commit-content .commit-diff-legend, .graph-viewer-snapshot .commit-diff-legend { margin: 4px 0; font-size: 11px; }
-.commit-change { min-width: 0; }
-.commit-change-title { display: block; margin: 6px 0 3px; overflow-wrap: anywhere; }
-#commit-content .commit-diff, .graph-viewer-snapshot .commit-diff { padding: 5px 0; margin: 3px 0 8px; }
-.commit-diff-line { display: block; min-height: 1.65em; padding: 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.commit-diff .commit-diff-added { background: #dcfce7; color: #166534; }
-.commit-diff .commit-diff-removed { background: #fee2e2; color: #991b1b; }
-.commit-diff .commit-diff-hunk { background: #e0f2fe; color: #075985; font-size: 11px; }
+.commit-change { min-width: 0; margin: 8px 0 12px; border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden; }
+.commit-change-title, .graph-viewer-snapshot .commit-change-title { display: block; margin: 0; padding: 8px 10px; border-bottom: 1px solid #d0d7de; background: #f6f8fa; color: #24292f; font-size: 12px; overflow-wrap: anywhere; }
+.commit-diff { overflow: auto; background: #fff; }
+.commit-diff:focus-visible { outline: 2px solid #0d9488; outline-offset: -2px; }
+.commit-diff-table { width: 100%; border-collapse: collapse; table-layout: fixed; color: #1f2328; font: 12px/1.7 var(--mono, Consolas, monospace); text-align: left; tab-size: 4; }
+.commit-diff-table th, .commit-diff-table td { padding: 1px 7px; border: 0; vertical-align: top; }
+.commit-diff-table thead { background: #f6f8fa; color: #656d76; font-size: 10px; }
+.commit-diff-table th { font-weight: 500; }
+.commit-diff-table .commit-diff-number { width: 4.5em; text-align: right; color: #656d76; white-space: nowrap; user-select: none; }
+.commit-diff-table .commit-diff-sign { width: 3.6em; text-align: center; white-space: nowrap; user-select: none; }
+.commit-diff-table .commit-diff-code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.commit-diff-table .commit-diff-context { background: #fff; }
+.commit-diff-table .commit-diff-added { background: #dafbe1; }
+.commit-diff-table .commit-diff-removed { background: #ffebe9; }
+.commit-diff-added .commit-diff-number { background: #ccffd8; }
+.commit-diff-removed .commit-diff-number { background: #ffd7d5; }
+.commit-diff-table .commit-diff-hunk { background: #ddf4ff; color: #0969da; font-size: 11px; }
+.commit-diff-table .commit-diff-hunk td { padding: 4px 10px; overflow-wrap: anywhere; }
+.commit-diff-table .commit-diff-note { background: #f6f8fa; color: #656d76; font-size: 11px; }
+.commit-diff-table .commit-diff-note td { padding: 2px 10px; }
+.commit-diff-empty { padding: 8px 10px; }
 .commit-full-snapshot { margin-top: 8px; }
 .commit-full-snapshot > summary { cursor: pointer; color: #34546a; }
 .commit-full-snapshot strong { display: block; margin: 8px 0 3px; overflow-wrap: anywhere; }

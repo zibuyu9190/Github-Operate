@@ -346,7 +346,7 @@ test('文件行的提交说明独立可点击，详情使用纯文本且收起�
     assert.ok(f.all().every(element => element.tagName !== 'button' || element.children.every(child => child.tagName !== 'button')));
     link.fire('click'); assert.equal(f.view.commitDetails.hidden, false); assert.equal(f.document.activeElement, f.view.commitDetails);
     assert.match(f.view.commitDetailTitle.textContent, /<img/);
-    assert.ok(f.all().some(element => element.className?.includes('commit-diff-added') && element.textContent.includes('<script>')));
+    assert.ok(f.all().some(element => element.className === 'commit-diff-code' && element.textContent.includes('<script>')));
     assert.equal(f.all().filter(element => ['img', 'script'].includes(element.tagName)).length, 0);
     const close = f.all().find(element => element.tagName === 'button' && element.textContent === '收起提交详情');
     close.fire('click'); assert.equal(f.view.commitDetails.hidden, true); assert.equal(f.document.activeElement, link);

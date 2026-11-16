@@ -99,7 +99,7 @@ test('节点更新纯文本详情但默认折叠，手动展开状态保留，�
   assert.equal(f.viewer.summary.textContent, 'C9 · <img src=x>（仅远程）');
   const elements = descendants(f.viewer.content);
   assert.ok(elements.some(item => item.textContent === '新增 · <script>.txt'));
-  assert.ok(elements.some(item => item.className?.includes('commit-diff-added') && item.textContent === '+ <img onerror=alert(1)>'));
+  assert.ok(diffRows(f.viewer.content, 'added').some(row => row[2] === '+' && row[3] === '<img onerror=alert(1)>'));
   assert.equal(elements.some(item => ['img', 'script'].includes(item.tag)), false);
   f.viewer.details.open = true; f.graph.onSelect(f.sim.state.commits.C0, false);
   assert.equal(f.viewer.details.open, true);
@@ -109,6 +109,13 @@ test('节点更新纯文本详情但默认折叠，手动展开状态保留，�
 
 function descendants(element) { return element.children.flatMap(child => [child, ...descendants(child)]); }
 
+function diffRows(element, kind) {
+  return descendants(element).filter(item => item.className?.split(' ').includes('commit-diff-row') && (!kind || item.className.split(' ').includes('commit-diff-' + kind)))
+    .map(row => row.children.map(cell => cell.textContent));
+}
+
+function changedText(element, kind) { return diffRows(element, kind).map(row => row[2] + ' ' + row[3]); }
+
 test('远程节点优先展示本次新增行，连续提交与 fetch 后均以实际父提交为基准', () => {
   const f = fixture(); f.viewer.open();
   for (let index = 0; index < 2; index++) {
@@ -116,13 +123,13 @@ test('远程节点优先展示本次新增行，连续提交与 fetch 后均以�
     const commit = f.sim.state.remote.commits[result.commitId];
     f.graph.onSelect(commit, true);
     const elements = descendants(f.viewer.content);
-    const added = elements.filter(item => item.className?.includes('commit-diff-added')).map(item => item.textContent);
+    const added = changedText(f.viewer.content, 'added');
     assert.deepEqual(added, index === 0 ? ['+ 团队协作记录', '+ 协作者更新 ' + order] : ['+ 协作者更新 ' + order]);
     assert.equal(f.viewer.content.children.at(-1).className, 'commit-full-snapshot');
     assert.ok(!f.viewer.content.children.at(-1).open);
     assert.equal(f.viewer.details.scrollTop, 0);
     f.sim.execute('git fetch'); f.graph.onSelect(f.sim.state.commits[commit.id], false);
-    assert.deepEqual(descendants(f.viewer.content).filter(item => item.className?.includes('commit-diff-added')).map(item => item.textContent), added);
+    assert.deepEqual(changedText(f.viewer.content, 'added'), added);
   }
 });
 
@@ -137,8 +144,8 @@ test('内容替换、整文件删除与空文件新增分别标记，初始和�
   assert.ok(elements.some(item => item.textContent === '删除 · notes.txt'));
   assert.ok(elements.some(item => item.textContent === '新增 · empty.txt'));
   assert.ok(elements.some(item => item.textContent === '新增空文件'));
-  assert.ok(elements.some(item => item.className?.includes('commit-diff-removed') && item.textContent === '− ' + oldText.split('\n')[0]));
-  assert.ok(elements.some(item => item.className?.includes('commit-diff-added') && item.textContent === '+ 新问候'));
+  assert.ok(changedText(f.viewer.content, 'removed').includes('− ' + oldText.split('\n')[0]));
+  assert.ok(changedText(f.viewer.content, 'added').includes('+ 新问候'));
   const root = f.sim.state.commits.C0; f.viewer.showCommit(root, false);
   assert.ok(descendants(f.viewer.content).some(item => item.textContent?.includes('相对空仓库')));
   f.viewer.showCommit({ ...root, parents: [original], tree: f.sim.state.commits[original].tree }, false);
@@ -165,6 +172,66 @@ test('与对象原型同名的普通文件仍按新增文本显示，快照与�
   f.viewer.showCommit(commit, true);
   const elements = descendants(f.viewer.content);
   assert.ok(elements.some(item => item.textContent === '新增 · toString'));
-  assert.ok(elements.some(item => item.className?.includes('commit-diff-added') && item.textContent === '+ 普通文本文件'));
+  assert.ok(changedText(f.viewer.content, 'added').includes('+ 普通文本文件'));
   assert.deepEqual(f.sim.snapshot(), before);
+});
+
+/** 直接调用三处入口共用的渲染器，校验对外可见的行号、符号和文本，而非内部差异算法。 */
+function renderDiff(before, after) {
+  const f = fixture(), tree = text => text === undefined ? {} : { 'sample.txt': text };
+  f.viewer.constructor.renderCommit(f.viewer.content, { id: 'C9', hash: 'test', parents: ['BASE'], tree: tree(after) },
+    { commits: { BASE: { tree: tree(before) } }, remote: { commits: {} } });
+  const elements = descendants(f.viewer.content);
+  return { rows: diffRows(f.viewer.content), headers: elements.filter(item => item.className === 'commit-diff-hunk').map(row => row.children[0].textContent), elements };
+}
+
+test('统一差异显示新旧行号、增删符号及未修改上下文，替换不会错位', () => {
+  const f = renderDiff('甲\n乙\n旧内容\n丁\n戊\n', '甲\n乙\n新内容\n丁\n戊\n');
+  assert.deepEqual(f.headers, ['@@ -1,5 +1,5 @@']);
+  assert.deepEqual(f.rows, [['1', '1', '', '甲'], ['2', '2', '', '乙'], ['3', '', '−', '旧内容'], ['', '3', '+', '新内容'], ['4', '4', '', '丁'], ['5', '5', '', '戊']]);
+  assert.deepEqual(f.elements.filter(item => item.tag === 'th').map(item => item.textContent), ['旧行号', '新行号', '变化', '内容']);
+});
+
+test('插入和删除后新旧行号独立累计，相邻改动共享上下文且不重复行', () => {
+  const f = renderDiff('a\nb\nc\nd\ne\nf\n', 'x\na\nb\nc\ne\nf\ny\n');
+  assert.deepEqual(f.headers, ['@@ -1,6 +1,7 @@']);
+  assert.deepEqual(f.rows, [['', '1', '+', 'x'], ['1', '2', '', 'a'], ['2', '3', '', 'b'], ['3', '4', '', 'c'], ['4', '', '−', 'd'], ['5', '5', '', 'e'], ['6', '6', '', 'f'], ['', '7', '+', 'y']]);
+});
+
+test('远距离改动分为两个片段，各保留三行上下文，省略行后行号仍对应完整文件', () => {
+  const before = Array.from({ length: 20 }, (_, i) => '行' + (i + 1)), after = [...before]; after[1] = '修改2'; after[17] = '修改18';
+  const f = renderDiff(before.join('\n') + '\n', after.join('\n') + '\n');
+  assert.deepEqual(f.headers, ['@@ -1,5 +1,5 @@', '@@ -15,6 +15,6 @@']);
+  assert.deepEqual(f.rows.filter(row => row[2] === '+'), [['', '2', '+', '修改2'], ['', '18', '+', '修改18']]);
+  assert.equal(f.rows.some(row => Number(row[0]) >= 6 && Number(row[0]) <= 14), false);
+  assert.deepEqual(f.rows.at(-1), ['20', '20', '', '行20']);
+});
+
+test('整文件新增、删除及新增空行使用正确空侧范围，空文件仍有明确说明', () => {
+  const added = renderDiff(undefined, '第一行\n\n末行\n');
+  assert.deepEqual(added.headers, ['@@ -0,0 +1,3 @@']);
+  assert.deepEqual(added.rows, [['', '1', '+', '第一行'], ['', '2', '+', ''], ['', '3', '+', '末行']]);
+  const removed = renderDiff('第一行\n末行\n', undefined);
+  assert.deepEqual(removed.headers, ['@@ -1,2 +0,0 @@']);
+  assert.deepEqual(removed.rows, [['1', '', '−', '第一行'], ['2', '', '−', '末行']]);
+  for (const [before, after, label] of [[undefined, '', '新增空文件'], ['', undefined, '删除空文件']]) {
+    const f = renderDiff(before, after); assert.deepEqual(f.rows, []); assert.deepEqual(f.headers, []);
+    assert.ok(f.elements.some(item => item.textContent === label));
+  }
+});
+
+test('仅末尾换行变化不会伪装成空行，缺少换行的对应版本明确标注', () => {
+  const f = renderDiff('相同文字', '相同文字\n');
+  assert.deepEqual(f.rows, [['1', '', '−', '相同文字'], ['', '1', '+', '相同文字']]);
+  assert.deepEqual(f.headers, ['@@ -1 +1 @@']);
+  const notes = f.elements.filter(item => item.className === 'commit-diff-note');
+  assert.equal(notes.length, 1); assert.equal(notes[0].children[0].textContent, '\\ 文件末尾没有换行');
+  assert.equal(renderDiff('甲\n乙', '甲\n丙').elements.filter(item => item.className === 'commit-diff-note').length, 2);
+});
+
+test('CRLF 文本与 HTML、缩进、空格保持纯文本，不生成可执行元素', () => {
+  const f = renderDiff('旧\r\n', '  <img src=x onerror=alert(1)>\r\n\t末尾  \r\n');
+  assert.deepEqual(f.rows, [['1', '', '−', '旧'], ['', '1', '+', '  <img src=x onerror=alert(1)>'], ['', '2', '+', '\t末尾  ']]);
+  assert.equal(f.elements.some(item => ['img', 'script'].includes(item.tag)), false);
+  assert.equal(f.elements.some(item => item.className === 'commit-diff-note'), false);
 });
