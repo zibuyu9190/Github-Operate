@@ -85,6 +85,20 @@
 .help-reference-row code { cursor: text; }
 .help-reference-row a { color: #0f766e; }
 
+/* 说明独立于命令按钮；折叠仅改变阅读状态，不填入或执行命令。 */
+.help-operation-legend { padding: 9px 12px; border: 1px solid #bfdbfe; border-radius: 7px; background: #eff6ff; color: #1e40af; }
+.help-row.has-operation-note { flex-wrap: wrap; gap: 6px 10px; }
+.has-operation-note > .command-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.help-operation { flex: 0 0 100%; width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #c7d2fe; border-radius: 6px; background: #f5f7ff; color: #334155; font-size: 11px; line-height: 1.6; }
+.help-template-row > .help-operation, .help-expanded-grid .help-operation { flex: none; }
+.help-operation > summary { padding: 5px 8px; cursor: pointer; overflow-wrap: anywhere; }
+.help-operation > summary:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
+.help-operation-badge { display: inline-block; padding: 0 5px; border: 1px solid #c7d2fe; border-radius: 4px; background: #e0e7ff; color: #3730a3; font-size: 10px; font-weight: 600; white-space: nowrap; vertical-align: baseline; }
+.help-operation-steps { margin-left: 6px; }
+.help-operation > p { margin: 0; padding: 5px 9px 8px; border-top: 1px solid #dbe2fa; overflow-wrap: anywhere; }
+.help-operation a { color: #3730a3; }
+.help-operation-badge.is-chain { border-color: #fde68a; background: #fef3c7; color: #92400e; }
+
 /* 远程目标独立于本地分支，用明确标签和原生选择框支持键盘及长分支名称。 */
 .remote-heading { flex-wrap: wrap; }
 .remote-branch-controls { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }

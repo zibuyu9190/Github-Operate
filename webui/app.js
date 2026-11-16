@@ -476,6 +476,7 @@
   });
   $('help-title').textContent = 'Git 命令手册与常用流程';
   document.querySelector('#help-dialog > p').textContent = '点击命令示例只会填入输入框，再按 Enter 执行；标为“仅供参考”的条目与含 && 的组合行供真实终端使用。';
+  $('help-content').prepend(node('p', 'help-note help-operation-legend', '复合操作：一条 Git 命令内完成多个步骤，点击标记可展开前提与说明。箭头是过程概括，具体行为受参数、配置和仓库状态影响；“终端组合”则是用 && 连写多条命令。可搜索“复合”查看所有标注。'));
 
   /** 占位符用于讲解语法；点击时改用有效示例并选中变量，避免把尖括号当成实际参数。 */
   const templates = [
@@ -509,7 +510,7 @@
     ['切换主分支并更新', 'git switch main && git pull --no-rebase origin main', '先保存并提交改动，保持工作区干净，再切换 main 并合并远程更新。', [['git switch main'], ['git pull --no-rebase origin main']]],
     ['取消全部暂存，保留修改', 'git reset --mixed HEAD', '暂存区回到 HEAD，工作区内容保留。随后可以重新选择文件 add；不会撤回提交。', [['git reset --mixed HEAD']]],
     ['合并功能分支并清理', 'git switch main && git merge <your-branch-name> && git branch -d <your-branch-name>', '先保持工作区干净，再合入功能分支。发生冲突时先解决，合并成功后再删除分支；已设置上游的分支还须已合入上游，-d 才允许删除。', [['git switch main'], ['git merge feature-demo', 'feature-demo'], ['git branch -d feature-demo', 'feature-demo']]],
-    ['解决合并冲突后继续', 'git add <file-path> && git merge --continue', '先在文件区编辑并保存，删除所有冲突标记，再 add 所有解决文件并继续；还有冲突时不能继续。', [['git add hello.txt', 'hello.txt'], ['git merge --continue']]],
+    ['解决合并冲突后继续', 'git add <file-path> && git merge --continue', '先编辑并保存最终内容，删除所有冲突标记，再 add 所有解决文件。merge --continue 会完成合并提交，无需再单独 commit；还有未解决冲突时不能继续。', [['git add hello.txt', 'hello.txt'], ['git merge --continue']]],
     ['解决变基冲突后继续', 'git add <file-path> && git rebase --continue', '编辑并保存当前重放提交的冲突，add 后继续；后续提交可能再次暂停。stash pop 冲突全部 add 后即可正常提交，没有 --continue。', [['git add hello.txt', 'hello.txt'], ['git rebase --continue']]],
     ['临时保存，切换分支，再恢复', 'git stash push -u -m "临时保存" && git switch <your-branch-name> && git stash pop', '保存当前改动后切换到已存在的目标分支，再恢复改动。pop 成功后移除记录，冲突时保留；可先 stash list 核对。', [['git stash push -u -m "临时保存"'], ['git switch main', 'main'], ['git stash list'], ['git stash pop']]]
   ];
@@ -517,7 +518,9 @@
   flowGroup.append(node('h3', '', '常用组合流程 · 真实终端整行执行'), node('p', 'help-note help-terminal-note', '&& 在 PowerShell 7、Git Bash 等终端中表示：前一步成功才执行下一步。失败后会停止后续命令，已成功的步骤不会自动撤销。网页暂不支持 &&，请依次点击下面的分步命令，逐条执行。'));
   for (const [title, chain, description, steps] of workflows) {
     const card = node('article', 'help-flow'), code = node('pre', 'help-chain', chain), actions = node('div', 'help-flow-steps');
-    card.append(node('h4', '', title), code, node('p', 'help-note', description), node('div', 'help-step-label', '网页分步练习 · 按顺序点击填入，再按 Enter 执行'));
+    const heading = node('h4', '', title);
+    if (chain.includes('&&')) heading.prepend(node('span', 'help-operation-badge is-chain', '终端组合'), document.createTextNode(' '));
+    card.append(heading, code, node('p', 'help-note', description), node('div', 'help-step-label', '网页分步练习 · 按顺序点击填入，再按 Enter 执行'));
     steps.forEach(([command, selection], i) => { const button = commandButton(command, selection); button.textContent = (i + 1) + ' · ' + command; actions.append(button); });
     card.append(actions); flowGroup.append(card);
   }
@@ -531,10 +534,10 @@
     ['查看状态与差异', [['git status', '查看三个区域和同步状态'], ['git log --oneline --graph --all', '可达历史；文本列出父提交'], ['git show HEAD', '查看提交说明与改动；也可指定分支或提交 ID'], ['git diff', '工作区与暂存区差异'], ['git diff --cached', '暂存区与 HEAD 差异']]],
     ['暂存、提交与临时保存', [['git add hello.txt', '支持多个文件，含空格的路径加引号'], ['git add .', '暂存所有新增、修改和删除'], ['git restore --staged hello.txt', '取消该文件暂存，保留工作区修改'], ['git restore hello.txt', '恢复为暂存区内容，丢弃该文件未暂存修改'], ['git restore --staged .', '取消全部暂存，保留工作区修改'], ['git commit -m "学习 Git"', '提交暂存内容，中文说明可用'], ['git stash push -m "临时保存"', '保存已跟踪改动；未跟踪文件保留在工作区'], ['git stash push -u -m "临时保存"', '连未跟踪文件一起保存，HEAD 不变'], ['git stash list', '列出保存记录，stash@{0} 为最近一份'], ['git stash pop', '恢复最近一份，成功后移除，冲突时保留；普通修改需重新 add']]],
     ['分支与切换', [['git branch', '列出本地分支'], ['git branch -a', '列出本地与远程跟踪分支'], ['git branch -vv', '查看上游以及领先/落后数量，依据最近同步'], ['git branch bugFix', '在当前提交创建分支'], ['git branch -d bugFix', '仅删除已合入目标的非当前分支'], ['git switch -c feature', '创建并切换分支'], ['git switch main', '切换已有本地分支'], ['git checkout -b feature', '创建并切换分支'], ['git checkout C0', '切换分支或提交；提交进入分离 HEAD']]],
-    ['合并', [['git merge bugFix', '快进或创建双亲提交'], ['git merge --no-ff bugFix', '需要合并时强制创建合并提交'], ['git merge --continue', '解决冲突并 add 后继续'], ['git merge --abort', '恢复操作前状态']]],
+    ['合并', [['git merge bugFix', '快进或创建双亲提交'], ['git merge --no-ff bugFix', '需要合并时强制创建合并提交'], ['git merge --continue', '解决冲突并 add 后完成合并提交，无需再单独 commit'], ['git merge --abort', '恢复操作前状态']]],
     ['变基', [['git rebase main', '将当前线性分支重放到目标之上'], ['git rebase --continue', '解决冲突并 add 后继续'], ['git rebase --abort', '恢复变基前状态']]],
     ['Reset 与 Revert', [['git reset --soft HEAD~1', '只移动分支/HEAD'], ['git reset --mixed HEAD~1', '同时重置暂存区；省略模式时默认 mixed'], ['git reset --mixed HEAD', '取消全部暂存，保留工作区修改和当前提交'], ['git reset --hard HEAD~1', '同时重置已跟踪文件，未跟踪文件通常保留'], ['git reset', '默认 mixed，目标默认 HEAD'], ['git revert HEAD', '用新提交抵消一个普通提交'], ['git revert --continue', '解决冲突并 add 后继续'], ['git revert --abort', '中止撤回']]],
-    ['虚拟远程协作', [['git remote -v', '查看虚拟 origin；不读取真实仓库地址'], ['git fetch origin', '只下载对象、更新 origin/*'], ['git pull', '先 fetch，再 merge；需要已配置上游'], ['git pull --no-rebase origin main', '明确使用合并'], ['git pull --rebase origin main', '明确使用变基'], ['git push', '推送到当前分支的上游'], ['git push origin main', '推送指定同名分支'], ['git push -u origin bugFix', '推送并设置上游']]],
+    ['虚拟远程协作', [['git remote -v', '查看虚拟 origin；不读取真实仓库地址'], ['git fetch origin', '只下载对象、更新 origin/*'], ['git pull', '本练习先 fetch，再 merge；无参数时需要已配置上游'], ['git pull --no-rebase origin main', '先 fetch，再用 merge 整合到当前分支'], ['git pull --rebase origin main', '先 fetch，再用 rebase 整合到当前分支'], ['git push', '推送到当前分支的上游'], ['git push origin main', '推送指定同名分支'], ['git push -u origin bugFix', '推送并设置上游']]],
     ['提交引用', [['git checkout HEAD~1', '第一父链向前一代，支持 HEAD~n'], ['git checkout HEAD^', '默认第一个父提交；也可用 ^2'], ['git checkout 0000001', '模拟短 ID；也可直接用 C0'], ['git merge origin/main', '使用最近 fetch 的本地远程跟踪引用']]]
   ];
   const stashNote = node('p', 'help-note', '练习边界：restore 支持明确文件名和 .，冲突中请编辑后 add。stash pop/apply 可指定 stash@{n}，要求已跟踪文件和暂存区干净；不支持 --index。apply 保留记录，pop 成功后移除；drop/clear 只移除记录。stash 使用独立快照保存，不在提交图中新增普通提交；刷新或切换场景会清空。参考：');
@@ -609,6 +612,42 @@
   const extraGrid = node('div', 'help-bento-grid help-expanded-grid'); extraGrid.append(dailyGroup, comparison, reference);
   const extraPanel = typeof helpPanels !== 'undefined' ? helpPanels.get('advanced') : $('help-content');
   extraPanel.append(extraGrid);
+
+  // 仅解释手册中已有的写法，不参与命令解析。先生成说明，再建立搜索索引，折叠内容也能被检索。
+  const operationGuides = [
+    [/^git merge --continue$/, '检查合并状态 → commit 完成合并', '先编辑、保存并 add 所有冲突解决结果；此命令会检查是否有未完成的合并，再调用 commit。成功后已产生合并提交，无需再 commit；它不包含 add 或 push。真实终端可能打开提交说明编辑器。', 'merge'],
+    [/^git merge (?:--no-ff )?[^-]/, '整合两条历史 → 需要时自动提交', '普通 merge 可以直接快进，此时不新增提交；分叉历史合并成功后默认创建合并提交，--no-ff 在需要合并时禁用快进。冲突会暂停，解决并 add 后才能 --continue；merge 不会先 fetch，也不会 push。', 'merge'],
+    [/^git pull --no-rebase\b/, 'fetch → merge', '先获取远程更新，再合入当前分支；在常见 origin 配置下，可分步理解为 git fetch origin，再 git merge origin/main（示例目标是 main）。快进不新增提交；分叉合并通常生成合并提交，冲突时暂停。合并失败不会撤销已完成的 fetch。', 'pull'],
+    [/^git pull --rebase\b/, 'fetch → rebase', '先获取远程更新，再将当前分支需要重放的提交放到目标之上；目标是 main 时可分步理解为 git fetch origin，再 git rebase origin/main。可能产生新提交 ID；冲突时先编辑并 add，再 rebase --continue，后续提交仍可能再次暂停。', 'pull'],
+    [/^git pull$/, 'fetch → 按策略整合（本练习为 merge）', '无参数时使用当前分支的上游。本练习将普通 pull 配置为合并方式；真实 Git 的整合方式受参数、pull.rebase、pull.ff 等配置及版本影响，可能使用 merge、rebase，或仅允许快进。要明确选择，可写 --no-rebase 或 --rebase。', 'pull'],
+    [/^git switch -c\b/, '创建分支 → 切换到新分支', '可理解为 git branch <新分支>，再 git switch <新分支>。switch -c 把两步作为一次操作，切换失败时不会留下刚创建的分支。创建分支不会产生提交，也不会自动发布到远程。', 'switch'],
+    [/^git checkout -b\b/, '创建分支 → 切换到新分支', '在这里对应 switch -c；可理解为先 branch 创建，再 checkout 切换。仍须遵循未提交文件的切换保护；不会自动 commit 或 push。', 'checkout'],
+    [/^git commit (?:-am\b|-a\s+-m\b)/, '暂存已跟踪文件的改动 → commit', '-a 自动暂存已跟踪文件的修改和删除，再与暂存区中已有内容一起提交；它不会自动加入未跟踪的新文件。已经 add 的新文件仍会随暂存区提交。此命令不包含 push，也不等于 add . 后 commit。', 'commit'],
+    [/^git stash pop(?:\s|$)/, 'apply 恢复改动 → 成功后 drop 记录', '可理解为恢复指定 stash，恢复成功后再移除该记录；默认处理 stash@{0}。发生冲突时记录保留，先解决并 add，再自行核对是否 drop。不会自动 commit，也没有 stash --continue。', 'stash'],
+    [/^git stash push(?:\s|$)/, '保存临时快照 → 清理已保存的改动', '把要保存的工作区和暂存区状态存入 stash，再将对应改动移出当前工作区和暂存区；默认处理已跟踪文件，-u 还包含未跟踪文件。没有改动时不会新增记录；HEAD 不前进，也不会 push。', 'stash'],
+    [/^git push\b.*\s-u(?:\s|$)/, 'push 发布提交 → 设置上游关系', '分支推送成功或已经是最新时，-u 建立本地分支与远程分支的跟踪关系；推送被拒绝时不会因此建立上游。它不包含 add、commit、fetch 或 pull；未提交的编辑不会被推送。', 'push'],
+    [/^git rebase --continue$/, '保存当前重放结果 → 继续后续提交', '先解决当前冲突并 add，再继续变基；通常会生成当前重放提交的新版本，然后继续处理剩余提交。后续仍可能冲突，并非所有情况一次 continue 就结束；它不包含 add 或 push。', 'rebase'],
+    [/^git rebase [^-]/, '逐个重放改动 → 更新分支历史', '可把常见线性变基理解为在新基点上逐个重放需要保留的提交；实际重放会生成新的提交 ID。无需重放或可以快进时不必生成新提交；冲突会暂停。它不是普通 merge，也不会自行 fetch 或 push。', 'rebase'],
+    [/^git cherry-pick --continue$/, '提交当前解决结果 → 继续剩余摘取', '先解决冲突并 add；继续时完成当前摘取提交，再处理同一批中剩余的提交。后续仍可能冲突；当前结果为空时需按提示处理，不能保证必定生成提交。', 'cherry-pick'],
+    [/^git cherry-pick [^-]/, '应用指定提交的改动 → 创建新提交', '默认会为每个成功摘取的改动创建新提交，无需再手动 commit；不等于把整个分支 merge 过来。冲突时暂停，编辑并 add 后使用 cherry-pick --continue；空改动可能需要 --skip。', 'cherry-pick'],
+    [/^git revert --continue$/, '提交反向改动的解决结果 → 继续撤回', '先解决冲突并 add，再继续生成用于撤回的提交；它不会替你 add，也不会 push。本练习一次撤回一个普通提交。', 'revert'],
+    [/^git revert [^-]/, '应用反向改动 → 创建撤回提交', '默认以新提交抵消目标提交的改动，原提交仍在历史中，无需再单独 commit。冲突会暂停；先编辑并 add，再 revert --continue。它与 reset 移动分支指针的用途不同。', 'revert'],
+    [/^git rm (?!-)/, '删除文件 → 暂存删除', '同时从工作区和暂存区删除指定跟踪文件；删除改动仍需 commit 保存。存在受保护的未提交内容时可能拒绝。rm --cached 仅取消跟踪、保留工作区文件，不能按同样的步骤理解。', 'rm'],
+    [/^git mv\s/, '移动或改名文件 → 更新暂存区路径', '同步更新文件位置和暂存区中的路径变化，之后仍需 commit 保存；它不会自动提交或推送。', 'mv'],
+    [/^git clone\s/, '创建本地仓库 → 获取历史 → 检出初始分支', '普通 clone 会配置 origin、获取对象和远程跟踪引用，并建立、检出初始本地分支；远程空仓库或使用 --bare、--no-checkout 等选项时不同。此条仍仅供真实终端参考，网页不会执行。', 'clone'],
+    [/^git fetch --prune\b/, 'fetch 获取更新 → 清理过期跟踪引用', '按远程的 refspec 清理已不存在的远程引用；常见配置下清理的是 origin/*，不会删除你自己的本地开发分支。此条仍仅供真实终端参考，网页不会执行。', 'fetch']
+  ];
+  for (const row of $('help-content').querySelectorAll('.help-row')) {
+    const command = row.querySelector('.command-chip')?.textContent || '';
+    const guide = operationGuides.find(([pattern]) => pattern.test(command));
+    if (!guide) continue;
+    const [, steps, description, page] = guide, detail = node('details', 'help-operation'), summary = node('summary');
+    summary.append(node('span', 'help-operation-badge', '复合操作'), node('span', 'help-operation-steps', steps));
+    const note = node('p', '', description), link = node('a', '', 'Git 官方说明');
+    link.href = 'https://git-scm.com/docs/git-' + page; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    note.append(document.createTextNode(' '), link); detail.append(summary, note);
+    row.classList.add('has-operation-note'); row.append(detail);
+  }
   // 工作区保留可编辑文本，同时提供按行着色的差异视图。
   const workDetails = node('details', 'work-diff'); workDetails.append(node('summary', '', '查看工作区相对暂存区的差异'));
   const workDiff = node('pre', 'code-view'); workDiff.id = 'work-diff'; workDetails.append(workDiff);
