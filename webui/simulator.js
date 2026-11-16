@@ -113,11 +113,12 @@
     return text.replace(/\r\n/g, '\n');
   }
 
-  /** 协作者的工作区和暂存区独立保存，不借用本地仓库的 HEAD、index 或 work。 */
+  /** 每个协作者分支拥有独立提交、工作区和暂存区；只有 push 才发布到共享远程。 */
   class RemoteWorkspace {
     constructor(branch, commit) {
       this.branch = branch; this.baseId = commit.id; this.base = clone(commit.tree);
       this.work = clone(commit.tree); this.index = clone(commit.tree);
+      this.commits = { [commit.id]: clone(commit) }; this.tracking = { [branch]: commit.id }; this.pending = null;
     }
     editFile(path, text) {
       validPath(path); const normalized = normalizeFileText(text);
@@ -135,50 +136,57 @@
       for (const path of targets) put(this.index, path, value(this.work, path));
     }
     fileStatus() {
-      return keys(this.base, this.index, this.work).map(path => ({ path, staged: value(this.base, path) !== value(this.index, path), unstaged: value(this.index, path) !== value(this.work, path), deleted: !own(this.work, path) }));
+      return keys(this.base, this.index, this.work).map(path => ({ path, staged: value(this.base, path) !== value(this.index, path), unstaged: value(this.index, path) !== value(this.work, path), deleted: !own(this.work, path), conflict: Boolean(this.pending?.unresolved.includes(path)) }));
     }
     isClean() { return same(this.base, this.index) && same(this.index, this.work); }
-    /** 提交仅接纳暂存快照，保留暂存之后再次编辑的工作区内容。 */
-    acceptCommit(commit) { this.baseId = commit.id; this.base = clone(commit.tree); this.index = clone(commit.tree); }
-
-    /** 复用本地命令语义时使用独立快照；远程分支名在这里代表协作者可查看的历史。 */
+    /** 复用同一引擎的提交、推送和整合语义，不借用“我的本地”的对象或引用。 */
     commandRepository(sim) {
       const repository = Object.create(Simulator.prototype);
+      const commits = clone(this.commits), objects = { ...sim.state.remote.commits, ...commits };
+      // 构造器只接收起点；补齐该起点的父链，不能悄悄导入远程后来的新提交。
+      const visit = id => { if (!objects[id]) throw new Error('协作者提交历史不完整，请重新载入远程。'); commits[id] = clone(objects[id]); objects[id].parents.forEach(parent => { if (!own(commits, parent)) visit(parent); }); };
+      visit(this.baseId); Object.values(this.tracking).forEach(visit);
       repository.state = {
-        commits: clone(sim.state.remote.commits), branches: { ...sim.state.remote.branches, [this.branch]: this.baseId },
+        commits, branches: { [this.branch]: this.baseId },
         head: { branch: this.branch, id: null }, index: clone(this.index), work: clone(this.work),
-        tags: {}, tracking: {}, upstreams: {}, pending: null, stashes: [], reflog: [], previousCheckout: null,
-        remote: { commits: {}, branches: {} }, nextId: sim.state.nextId
+        tags: {}, tracking: clone(this.tracking), upstreams: { [this.branch]: this.branch }, pending: clone(this.pending), stashes: [], reflog: [], previousCheckout: null,
+        remote: clone(sim.state.remote), nextId: sim.state.nextId
       };
       return repository;
     }
 
     commandContext(sim) {
       const repository = this.commandRepository(sim);
-      return { mode: 'remote', state: repository.state, files: repository.fileStatus(), stale: this.baseId !== sim.state.remote.branches[this.branch] };
+      const actual = sim.state.remote.branches[this.branch], local = repository.ancestors(this.baseId), remote = repository.ancestors(actual, sim.state.remote.commits);
+      return { mode: 'remote', state: repository.state, files: repository.fileStatus(), stale: this.tracking[this.branch] !== actual,
+        ahead: [...local].filter(id => !remote.has(id)).length, behind: [...remote].filter(id => !local.has(id)).length };
     }
 
-    /** 协作者仍是直接提交到虚拟远程的简化模式，不伪造第二份克隆或额外 push。 */
+    /** 先在独立快照中执行；失败不改变任何一方，成功 commit 仅占用全局唯一的模拟编号。 */
     execute(sim, input) {
       const before = sim.snapshot();
       try {
         const command = Commands.parse(input);
-        if (!['status', 'log', 'show', 'diff', 'add', 'restore', 'commit'].includes(command.name) || command.amend) {
-          throw new Error('协作者模式支持 status、log、show、diff、add、restore、commit（含 -a，不含 --amend）。commit 直接提交到虚拟远程；其他操作请切回“我的本地”。');
+        const continuation = ['merge', 'rebase'].includes(command.name) && ['continue', 'abort'].includes(command.action);
+        if ((!['status', 'log', 'show', 'diff', 'add', 'restore', 'commit', 'fetch', 'pull', 'push'].includes(command.name) && !continuation) || command.amend) {
+          throw new Error('协作者模式支持 status、log、show、diff、add、restore、commit（含 -a）、fetch、pull、push，以及 pull 冲突后的 merge/rebase --continue 或 --abort；暂不支持切换分支或 --amend。');
         }
+        if (command.branch && command.branch !== this.branch) throw new Error('请先在协作者分支选择框切换到 ' + command.branch + '，再执行此命令。');
+        if (command.name === 'commit' && (!command.message?.trim() || command.message.length > 200)) throw new Error('请填写提交说明，最多 200 个字符。');
         if (!own(sim.state.remote.branches, this.branch)) throw new Error('所选远程分支不存在，请先在本地 push 或选择其他远程分支。');
         const repository = this.commandRepository(sim), result = repository.execute(input);
         if (!result.ok) return { ...result, before, after: before };
-        let submitted = {};
-        if (command.name === 'commit') {
-          submitted = sim.commitRemote(this.branch, { baseId: this.baseId, tree: repository.headTree(), message: command.message });
-          if (!submitted.ok) return { ...submitted, command, before, after: before };
-          this.acceptCommit(sim.state.remote.commits[submitted.commitId]);
-        } else this.index = clone(repository.state.index);
-        this.work = clone(repository.state.work);
-        return { ...result, ...submitted, actor: 'remote', output: '模拟协作者 · 远程 ' + this.branch + '\n' + (submitted.output || result.output),
-          explanation: submitted.explanation || '此命令操作协作者的独立工作区和暂存区。' + result.explanation,
-          before, after: sim.snapshot() };
+        if (!['status', 'log', 'show', 'diff'].includes(command.name)) {
+          this.baseId = repository.headId(); this.base = clone(repository.headTree());
+          this.index = clone(repository.state.index); this.work = clone(repository.state.work);
+          this.commits = clone(repository.state.commits); this.tracking = clone(repository.state.tracking); this.pending = clone(repository.state.pending);
+          sim.state.nextId = repository.state.nextId;
+        }
+        if (command.name === 'push') sim.state.remote = clone(repository.state.remote);
+        return { ...result, actor: 'remote', branch: this.branch, commitId: command.name === 'commit' ? this.baseId : undefined,
+          output: '模拟协作者 · 本地 ' + this.branch + '\n' + result.output,
+          explanation: command.name === 'commit' ? '协作者已提交到自己的本地仓库，尚未推送。执行 git push 后才会更新共享远程；你的本地需 fetch / pull 获取。' : '此命令操作协作者仓库。' + result.explanation,
+          graphBefore: result.before, graphAfter: result.after, before, after: sim.snapshot() };
       } catch (error) {
         return { ok: false, output: error.message, explanation: '命令未执行，本地仓库、虚拟远程和协作者草稿保持不变。', before, after: before };
       }
@@ -837,7 +845,7 @@
       } catch (error) { return { ok: false, output: error.message, explanation: '远程提交未创建，仓库与协作者草稿保持不变。' }; }
     }
 
-    /** 场景预置和快捷示例仍可自动追加一行；自由编辑通过 commitRemote 提交完整暂存快照。 */
+    /** 场景预置和快捷示例自动追加一行；协作者自由编辑通过独立仓库 commit 后再 push。 */
     simulateRemote(branch) {
       if (branch === undefined) branch = own(this.state.remote.branches, 'main') ? 'main' : Object.keys(this.state.remote.branches)[0];
       // 不把本地分支或跟踪引用误当作远程实际分支，校验失败时不创建对象或消耗提交编号。

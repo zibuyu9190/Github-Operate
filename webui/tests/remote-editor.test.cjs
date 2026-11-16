@@ -4,16 +4,20 @@ const { Simulator, RemoteWorkspace } = require('../simulator.js');
 
 function run(sim, command) { const result = sim.execute(command); assert.equal(result.ok, true, result.output); return result; }
 function workspace(sim, branch = 'main') { return new RemoteWorkspace(branch, sim.state.remote.commits[sim.state.remote.branches[branch]]); }
-function submit(sim, draft, message = '协作者自由编辑文件') { return sim.commitRemote(draft.branch, { baseId: draft.baseId, tree: draft.index, message }); }
+function submit(sim, draft, message = '协作者自由编辑文件') {
+  const result = draft.execute(sim, 'git commit -m ' + JSON.stringify(message));
+  if (result.ok) assert.equal(draft.execute(sim, 'git push').ok, true);
+  return result;
+}
 
 test('协作者草稿独立维护工作区与暂存区，提交只保存暂存版本并保留后续编辑', () => {
   const sim = new Simulator(), draft = workspace(sim), original = sim.snapshot();
   draft.editFile('hello.txt', '协作者暂存版本\r\n'); draft.stage(['hello.txt']); draft.editFile('hello.txt', '协作者后续草稿\n');
   assert.deepEqual(sim.snapshot(), original);
-  const result = submit(sim, draft); assert.equal(result.ok, true);
+  const parent = draft.baseId, result = submit(sim, draft); assert.equal(result.ok, true);
   const commit = sim.state.remote.commits[result.commitId];
-  assert.equal(commit.tree['hello.txt'], '协作者暂存版本\n'); assert.deepEqual(commit.parents, [draft.baseId]);
-  draft.acceptCommit(commit); assert.equal(draft.work['hello.txt'], '协作者后续草稿\n');
+  assert.equal(commit.tree['hello.txt'], '协作者暂存版本\n'); assert.deepEqual(commit.parents, [parent]);
+  assert.equal(draft.work['hello.txt'], '协作者后续草稿\n');
   assert.equal(draft.index['hello.txt'], '协作者暂存版本\n'); assert.equal(draft.fileStatus().find(file => file.path === 'hello.txt').unstaged, true);
   for (const key of Object.keys(original).filter(key => !['remote', 'nextId'].includes(key))) assert.deepEqual(sim.state[key], original[key], key);
   assert.equal(sim.state.remote.commits[original.remote.branches.main].tree['hello.txt'], original.work['hello.txt']);
@@ -28,7 +32,7 @@ test('协作者新增、修改、删除多个文件及空文件，diff 与快照
   const commit = sim.state.remote.commits[result.commitId];
   assert.equal(commit.tree['README.md'], undefined); assert.equal(commit.tree['empty.txt'], '');
   assert.equal(commit.tree['src/新增记录.txt'], '中文内容\n'); assert.equal(commit.tree['hello.txt'], '<img src=x onerror=alert(1)>\n');
-  assert.match(result.output, /\+<img/); assert.match(result.output, /--- README.md/);
+  assert.match(draft.execute(sim, 'git show HEAD').output, /\+<img/); assert.match(draft.execute(sim, 'git show HEAD').output, /--- README.md/);
   draft.work['hello.txt'] = '再次编辑'; assert.equal(commit.tree['hello.txt'], '<img src=x onerror=alert(1)>\n');
 });
 
@@ -42,7 +46,7 @@ test('main 与 dev 的协作者文件、暂存和基点彼此隔离，提交只�
   assert.equal(sim.state.tracking.dev, originalMain);
 });
 
-test('空提交、说明、路径、文本和过期基点校验失败，不改变仓库和协作者草稿', () => {
+test('预置远程直接提交接口校验说明、路径、文本和过期基点，失败不改变双方状态', () => {
   const sim = new Simulator(), draft = workspace(sim); draft.editFile('hello.txt', '有效改动\n'); draft.stage('.');
   const valid = { baseId: draft.baseId, tree: draft.index, message: '有效说明' };
   const badDrafts = [
@@ -57,7 +61,7 @@ test('空提交、说明、路径、文本和过期基点校验失败，不改�
     assert.deepEqual(sim.snapshot(), before); assert.deepEqual(structuredClone(draft), beforeDraft);
   }
   const before = sim.snapshot(); assert.equal(sim.commitRemote('missing', valid).ok, false); assert.deepEqual(sim.snapshot(), before);
-  sim.simulateRemote('main'); const advanced = sim.snapshot(); assert.equal(submit(sim, draft).ok, false); assert.deepEqual(sim.snapshot(), advanced);
+  sim.simulateRemote('main'); const advanced = sim.snapshot(); assert.equal(sim.commitRemote('main', valid).ok, false); assert.deepEqual(sim.snapshot(), advanced);
   assert.equal(draft.work['hello.txt'], '有效改动\n');
 });
 

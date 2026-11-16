@@ -78,13 +78,14 @@
     const at = contextAt(input, Math.max(0, Math.min(input.length, caret)));
     if (!at) return [];
     const { active, prefix, before } = at, state = context.state;
-    const remote = context.mode === 'remote', supported = ['status', 'log', 'show', 'diff', 'add', 'restore', 'commit'];
+    const remote = context.mode === 'remote', supported = ['status', 'log', 'show', 'diff', 'add', 'restore', 'commit', 'fetch', 'pull', 'push'];
+    if (remote && state.pending && ['merge', 'rebase'].includes(state.pending.type)) supported.push(state.pending.type);
     if (remote && before.length && !supported.includes(before[0])) return [];
     if (remote && before[0] === 'commit' && before.includes('--amend')) return [];
     let choices = [];
     const offer = (text, description, kind = '参数', edit = null) => choices.push({ text, description, kind, edit });
     const refs = (branchesOnly = false) => {
-      for (const name of Object.keys(state.branches)) offer(name, remote ? '协作者远程分支' : name === state.head.branch ? '当前本地分支' : '本地分支', '分支');
+      for (const name of Object.keys(state.branches)) offer(name, remote ? '协作者本地分支' : name === state.head.branch ? '当前本地分支' : '本地分支', '分支');
       if (branchesOnly) return;
       for (const name of Object.keys(state.tracking)) offer('origin/' + name, '本地远程跟踪引用', '引用');
       for (const name of Object.keys(state.tags || {})) offer(name, '本地版本标签', '标签');
@@ -220,8 +221,8 @@
     if (!parts) return '一次输入一条 Git 命令';
     const name = parts[0]?.value === 'git' ? parts[1]?.value : parts[0]?.value;
     if (context.mode === 'remote') {
-      if (name === 'commit') return '协作者用法：git commit [-a] -m "说明" · 直接提交到虚拟远程';
-      if (!['status', 'log', 'show', 'diff', 'add', 'restore'].includes(name)) return '协作者支持 status / log / show / diff / add / restore / commit；commit 直接提交到虚拟远程';
+      if (name === 'commit') return '协作者用法：git commit [-a] -m "说明" · 保存到协作者本地，之后 git push 发布到共享远程';
+      if (!['status', 'log', 'show', 'diff', 'add', 'restore', 'fetch', 'pull', 'push', context.state.pending?.type].includes(name)) return '协作者支持 status / log / show / diff / add / restore / commit / fetch / pull / push；commit 后需要 push';
     }
     return Object.hasOwn(catalog, name) ? '用法：git ' + catalog[name][1] : '输入命令、参数或文件名，按 Tab 自动补全';
   }
@@ -232,15 +233,23 @@
     const add = (command, description) => { if (!result.some(x => x.command === command)) result.push({ command, description }); };
     const changed = files.filter(f => f.unstaged || f.conflict), staged = files.some(f => f.staged);
     if (context.mode === 'remote') {
-      if (context.stale) add('git status', '远程已更新，先检查草稿，再点击“重新载入远程”');
-      else {
+      const op = state.pending;
+      if (op) {
+        const unresolved = files.filter(file => file.conflict);
+        const cleanMarkers = unresolved.every(file => !/^(<<<<<<< |=======|>>>>>>> )/m.test(state.work[file.path] || ''));
+        if (unresolved.length && cleanMarkers) add('git add ' + unresolved.map(file => quote(file.path)).join(' '), '暂存协作者的冲突解决结果');
+        if (!unresolved.length && !files.some(file => /^(<<<<<<< |=======|>>>>>>> )/m.test(state.index[file.path] || ''))) add('git ' + op.type + ' --continue', '继续协作者的整合操作');
+        add('git ' + op.type + ' --abort', '恢复协作者整合前的位置和文件');
+      } else {
         if (changed.length) add('git add ' + (changed.length <= 2 ? changed.map(f => quote(f.path)).join(' ') : '.'), '暂存协作者的文件改动');
-        if (staged) add('git commit -m "说明本次修改"', '将协作者暂存内容直接提交到所选虚拟远程分支');
+        if (staged) add('git commit -m "说明本次修改"', '保存到协作者本地，之后需要 push');
+        if (!staged && !changed.length && (context.stale || context.behind)) add('git pull --no-rebase', '下载并整合共享远程，保留协作者本地提交');
+        if (context.ahead && !context.behind) add('git push', '发布协作者已提交的内容，未提交文件不会上传');
       }
       if (staged) add('git diff --cached', '检查协作者准备提交的内容');
       else if (changed.some(f => !f.untracked)) add('git diff', '检查协作者尚未暂存的改动');
       add('git status', '查看协作者的工作区和暂存区');
-      add('git log --oneline', '查看所选远程分支的提交历史');
+      add('git log --oneline', '查看协作者本地分支的提交历史');
       return result.slice(0, 4);
     }
     const op = state.pending, current = headId(state);

@@ -261,12 +261,46 @@ test('真实 Git 对照：协作者自由编辑多个文件，本地 fetch 后 p
   draft.deleteFile('README.md'); draft.editFile('collaborator.txt', '协作者自定义的文件\n'); draft.stage('.');
   for (const [file, text] of Object.entries(draft.work)) fs.writeFileSync(path.join(collaborator, file), text, 'utf8');
   fs.unlinkSync(path.join(collaborator, 'README.md'));
-  f.git(['add', '.'], false, collaborator); f.git(['commit', '-m', '调整问候并更新协作文件'], false, collaborator); f.git(['push', 'origin', 'main'], false, collaborator);
-  assert.equal(f.sim.commitRemote('main', { baseId: draft.baseId, tree: draft.index, message: '调整问候并更新协作文件' }).ok, true);
+  f.git(['add', '.'], false, collaborator); f.git(['commit', '-m', '调整问候并更新协作文件'], false, collaborator);
+  const sharedBefore = f.sim.state.remote.branches.main, actualShared = f.git(['rev-parse', 'main'], false, remotePath).stdout;
+  assert.equal(draft.execute(f.sim, 'git commit -m "调整问候并更新协作文件"').ok, true);
+  assert.equal(f.sim.state.remote.branches.main, sharedBefore);
+  assert.equal(f.git(['rev-parse', 'main'], false, remotePath).stdout, actualShared);
+  f.command('fetch'); assert.equal(f.sim.state.tracking.main, sharedBefore); f.assertState();
+  f.git(['push', 'origin', 'main'], false, collaborator); assert.equal(draft.execute(f.sim, 'git push origin main').ok, true);
   f.edit('hello.txt', f.sim.state.work['hello.txt'].replace('你好，Git！', '本地的新问候')); f.commit('本地修改问候');
   f.command('fetch'); f.assertState(); assert.equal(f.command('pull', '--no-rebase', 'origin', 'main').conflict, true);
   f.edit('hello.txt', '统一问候\n'); f.command('add', '.'); f.command('merge', '--continue'); f.assertState();
   assert.equal(f.sim.state.work['README.md'], undefined); assert.equal(f.sim.state.work['collaborator.txt'], '协作者自定义的文件\n');
+});
+
+for (const mode of ['--no-rebase', '--rebase']) test('真实 Git 对照：协作者私有提交、拒绝非快进、pull ' + mode + ' 后推送', t => {
+  const f = fixture(t), remote = path.resolve(f.directory, '../remote.git'), peer = path.resolve(f.directory, '../collaborator');
+  f.git(['init', '--bare', '-b', 'main', remote]); f.git(['remote', 'add', 'origin', remote]); f.command('push', '-u', 'origin', 'main'); f.git(['clone', remote, peer]);
+  const draft = new RemoteWorkspace('main', f.sim.state.remote.commits[f.sim.state.remote.branches.main]);
+  const execute = (...args) => {
+    const text = 'git ' + args.map(arg => JSON.stringify(arg)).join(' '), result = draft.execute(f.sim, text), actual = f.git(args, true, peer);
+    assert.equal(result.ok && !result.conflict, actual.status === 0, text + '\n' + result.output + actual.stderr);
+    return result;
+  };
+  const compare = () => {
+    const names = f.git(['ls-tree', '-rz', '--name-only', 'HEAD'], false, peer).stdout.split('\0').filter(Boolean);
+    assert.deepEqual(Object.fromEntries(names.map(file => [file, f.git(['show', 'HEAD:' + file], false, peer).stdout])), draft.base);
+    const parents = f.git(['rev-list', '--parents', '-n', '1', 'HEAD'], false, peer).stdout.trim().split(' ').length - 1;
+    assert.equal(draft.commits[draft.baseId].parents.length, parents);
+  };
+  draft.editFile('peer.txt', '协作者提交一\n'); fs.writeFileSync(path.join(peer, 'peer.txt'), '协作者提交一\n'); execute('add', '.'); execute('commit', '-m', '协作者提交一');
+  const first = draft.baseId; compare();
+  f.edit('local.txt', '本地开发者提交\n'); f.commit('本地开发者提交'); f.command('push');
+  draft.editFile('peer.txt', '协作者提交二\n'); fs.writeFileSync(path.join(peer, 'peer.txt'), '协作者提交二\n'); execute('add', '.'); execute('commit', '-m', '协作者提交二'); compare();
+  assert.deepEqual(draft.commits[draft.baseId].parents, [first]);
+  const beforePush = f.sim.snapshot(); assert.equal(execute('push').ok, false); assert.deepEqual(f.sim.snapshot(), beforePush);
+  execute('fetch', 'origin'); execute('pull', mode); compare();
+  execute('push');
+  assert.equal(f.sim.state.remote.branches.main, draft.baseId);
+  assert.deepEqual(f.sim.state.remote.commits[draft.baseId].tree, draft.base);
+  assert.equal(f.git(['rev-parse', 'main'], false, remote).stdout, f.git(['rev-parse', 'HEAD'], false, peer).stdout);
+  f.command('pull', '--no-rebase'); f.assertState();
 });
 
 test('真实 Git 对照：cherry-pick 只摘取指定补丁，多提交顺序一致', t => {
