@@ -222,14 +222,14 @@
   }
 
   class Model {
-    constructor() { this.source = 'remote'; this.reference = ''; this.directory = ''; this.file = null; }
+    constructor(source = 'remote') { this.source = source; this.reference = ''; this.directory = ''; this.file = null; }
 
     /** 分支前进后重新读取快照；文件被删除时退回最近仍存在的目录，不展示旧文件内容。 */
     read(state) {
       const refs = references(state, this.source);
       let ref = refs.find(ref => ref.key === this.reference);
       if (!ref) {
-        ref = refs.find(ref => this.source === 'local' && ref.name === state.head.branch) || refs.find(ref => ref.name === 'main') || refs[0];
+        ref = refs.find(ref => this.source === 'local' && (state.head.branch ? ref.name === state.head.branch : ref.key === 'head:')) || refs.find(ref => ref.name === 'main') || refs[0];
         this.reference = ref?.key || '';
       }
       const commits = this.source === 'remote' ? state.remote.commits : state.commits;
@@ -265,7 +265,8 @@
   class View {
     /** 原生 dialog 负责焦点范围与 Esc；关闭后还原入口焦点，不重建现有文件编辑器。 */
     constructor(readContext, beforeOpen) {
-      this.readContext = readContext; this.beforeOpen = beforeOpen; this.model = new Model();
+      this.readContext = readContext; this.beforeOpen = beforeOpen;
+      this.actor = 'local'; this.model = new Model('local'); this.models = new Map([[this.actor, this.model]]);
       const make = (tag, className, text) => {
         const item = document.createElement(tag); if (className) item.className = className;
         if (text !== undefined) item.textContent = text;
@@ -279,7 +280,8 @@
       this.dialog = make('dialog', 'repository-browser'); this.dialog.id = 'repository-browser';
       this.dialog.setAttribute('aria-labelledby', 'repository-title'); this.dialog.setAttribute('aria-describedby', 'repository-hint');
       const header = make('header', 'repo-header'), identity = make('div', 'repo-identity');
-      identity.append(make('span', 'repo-symbol', '▣'), make('h2', '', 'Git Playground'), make('span', 'repo-badge', '虚拟仓库'));
+      this.actorBadge = make('span', 'repo-badge');
+      identity.append(make('span', 'repo-symbol', '▣'), make('h2', '', 'Git Playground'), this.actorBadge);
       identity.querySelector('h2').id = 'repository-title';
       this.closeButton = this.button('关闭', () => this.dialog.close()); this.closeButton.setAttribute('aria-label', '关闭仓库浏览');
       header.append(identity, this.closeButton);
@@ -292,8 +294,8 @@
         const group = make('div', 'repo-control'), caption = make('label', '', label); caption.htmlFor = select.id; group.append(caption, select); controls.append(group);
       }
       this.count = make('span', 'repo-file-count'); controls.append(this.count);
-      this.sourceSelect.addEventListener('change', () => this.render(this.model.selectSource(this.sourceSelect.value, this.readContext().state)));
-      this.branchSelect.addEventListener('change', () => this.render(this.model.selectReference(this.branchSelect.value, this.readContext().state)));
+      this.sourceSelect.addEventListener('change', () => { const { state } = this.context(); this.render(this.model.selectSource(this.sourceSelect.value, state)); });
+      this.branchSelect.addEventListener('change', () => { const { state } = this.context(); this.render(this.model.selectReference(this.branchSelect.value, state)); });
       this.hint = make('p', 'repo-hint'); this.hint.id = 'repository-hint';
       this.notice = make('p', 'repo-notice'); this.notice.setAttribute('role', 'status');
       this.commit = make('div', 'repo-latest');
@@ -324,7 +326,21 @@
       });
     }
 
-    reset() { this.model = new Model(); if (this.dialog.open) this.render(); }
+    /** 浏览状态按身份隔离；切换只读取该方快照，不执行同步或修改任何仓库。 */
+    context() {
+      const context = this.readContext(), actor = context.actor === 'remote' ? 'remote' : 'local';
+      if (actor !== this.actor) {
+        this.actor = actor;
+        if (!this.models.has(actor)) this.models.set(actor, new Model('local'));
+        this.model = this.models.get(actor);
+      }
+      return { ...context, actor };
+    }
+
+    reset() {
+      this.actor = 'local'; this.model = new Model('local'); this.models = new Map([[this.actor, this.model]]);
+      if (this.dialog.open) this.render();
+    }
 
     open() {
       if (this.dialog.open) return;
@@ -333,17 +349,23 @@
     }
 
     navigate(path) {
-      if (!this.model.openPath(path, this.readContext().state)) return;
+      const { state } = this.context();
+      if (!this.model.openPath(path, state)) return;
       this.render(); this.content.focus(); this.content.parentElement.scrollTop = 0;
     }
 
-    render(snapshot = this.model.read(this.readContext().state)) {
-      const make = this.make;
+    render(snapshot) {
+      const { state, actor } = this.context(), make = this.make;
+      snapshot = snapshot || this.model.read(state);
+      const owner = actor === 'remote' ? '协作者' : '我的';
+      this.actorBadge.textContent = actor === 'remote' ? '虚拟仓库 · 协作者视角' : '虚拟仓库 · 我的本地视角';
+      const sources = { remote: '共享远程仓库 · origin', local: owner + '本地仓库', tracking: owner + '远程跟踪 · origin/*' };
+      for (const option of this.sourceSelect.children) option.textContent = sources[option.value];
       this.sourceSelect.value = snapshot.source;
       this.branchSelect.replaceChildren(...snapshot.refs.map(ref => { const option = make('option', '', ref.name); option.value = ref.key; return option; }));
       this.branchSelect.value = snapshot.ref?.key || ''; this.branchSelect.disabled = !snapshot.refs.length;
       this.count.textContent = snapshot.total + ' 个已提交文件';
-      const meanings = { remote: '这里是远程实际提交的文件；协作者提交后即可查看，无需 fetch。', local: '这里是本地分支已提交的文件；工作区和暂存区中的未提交改动不在此显示。', tracking: '这里是本地记录的远程版本；fetch 更新跟踪引用，pull 才进一步整合本地分支。' };
+      const meanings = { remote: '这里是双方共享远程已接收的文件；任一方 push 后即可查看，只有本地 commit 尚不可见。', local: '这里是' + owner + '本地分支已提交的文件；工作区和暂存区中的未提交改动不在此显示。', tracking: '这里是' + owner + '本地记录的远程版本；该身份 fetch 更新跟踪引用，pull 才进一步整合本地分支。' };
       this.hint.textContent = meanings[snapshot.source] + ' 此视图只读，切换查看不会切换 HEAD 或改动草稿。';
       this.notice.textContent = snapshot.notice; this.notice.hidden = !snapshot.notice;
       this.commit.replaceChildren(); this.breadcrumb.replaceChildren(); this.content.replaceChildren();

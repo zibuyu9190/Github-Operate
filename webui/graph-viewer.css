@@ -164,3 +164,8 @@ body.repository-browser-open { overflow: hidden !important; }
   .repo-line-number { width: 40px; padding-right: 10px; }
   .repo-file-header { padding: 10px 12px; }
 }
+
+/* 身份名称比原来的“本地仓库”更长，手机上分行显示选择器以保留完整名称。 */
+@media (max-width: 480px) {
+  .repo-controls .repo-control { flex: 1 0 100%; }
+}

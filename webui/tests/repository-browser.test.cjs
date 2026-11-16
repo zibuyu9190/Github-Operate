@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { Simulator, edits } = require('../simulator.js');
+const { Simulator, RemoteWorkspace, edits } = require('../simulator.js');
 const { Model, View, listEntries, fileStats, latestPathCommit, commitAge } = require('../graph-viewer.js').RepositoryBrowser;
 
 function run(sim, command) { const result = sim.execute(command); assert.equal(result.ok, true, result.output); return result; }
@@ -83,7 +83,7 @@ test('分离 HEAD、无远程引用、空树和缺失本地对象均明确展示
 });
 
 /** 小型 DOM 测试仅检查纯文本渲染、导航及事件，原生弹窗与响应式排版另外通过浏览器验证。 */
-function fixture() {
+function fixture(readContext) {
   let document;
   class Element {
     constructor(tag) { this.tagName = tag; this.children = []; this.events = {}; this.attributes = {}; this.isConnected = true; this.scrollTop = 0; this.value = ''; this.textContent = ''; this.classes = new Set(); this.classList = { add: name => this.classes.add(name), remove: name => this.classes.delete(name) }; }
@@ -104,7 +104,7 @@ function fixture() {
   document = { createElement: tag => new Element(tag), body, activeElement: editor, getElementById: () => help };
   const sim = new Simulator(); let prepares = 0;
   const previous = global.document; global.document = document;
-  let view; try { view = new View(() => ({ state: sim.state }), () => prepares++); } finally { global.document = previous; }
+  let view; try { view = new View(() => readContext ? readContext(sim) : ({ state: sim.state }), () => prepares++); } finally { global.document = previous; }
   const withDocument = action => {
     const previous = global.document, oldSimulator = global.GitSimulator;
     global.document = document; global.GitSimulator = { edits };
@@ -127,7 +127,7 @@ test('仓库弹窗支持纯文本文件与 README 预览、目录导航及关闭
     assert.ok(f.all().some(element => element.attributes['aria-current'] === 'page' && element.textContent === '中文 文件.txt'));
     f.view.closeButton.fire('click'); assert.equal(f.document.activeElement, f.editor); assert.equal(f.document.body.classes.has('repository-browser-open'), false);
     f.view.open(); assert.equal(f.view.model.file, 'src/中文 文件.txt');
-    f.view.reset(); assert.equal(f.view.model.file, null); assert.equal(f.view.model.source, 'remote');
+    f.view.reset(); assert.equal(f.view.model.file, null); assert.equal(f.view.model.source, 'local');
   });
   assert.deepEqual(f.sim.snapshot(), before);
 });
@@ -142,6 +142,93 @@ test('弹窗选择框按实际来源更新内容，空文件和无分支状态�
     assert.equal(f.view.branchSelect.disabled, true); assert.ok(f.all().some(element => element.textContent.includes('此位置暂无分支')));
     f.view.dialog.fire('click', { clientX: 20, clientY: 20 }); assert.equal(f.view.dialog.open, true);
     f.view.dialog.fire('click', { clientX: 0, clientY: 0 }); assert.equal(f.view.dialog.open, false);
+  });
+});
+
+test('仓库浏览跟随身份与各自初始分支，隔离未推送提交并分别保留浏览位置', () => {
+  let actor = 'local', peer;
+  const f = fixture(sim => ({ actor, state: actor === 'remote' ? peer.commandContext(sim).state : sim.state }));
+  peer = new RemoteWorkspace('main', f.sim.state.remote.commits[f.sim.state.remote.branches.main], f.sim.state.remote);
+  run(f.sim, 'git switch -c mine'); commit(f.sim, 'mine.txt', '我的未推送提交\n');
+  const executePeer = command => { const result = peer.execute(f.sim, command); assert.equal(result.ok, true, result.output); };
+  executePeer('git switch -c dev'); peer.editFile('peer.txt', '协作者未推送提交\n');
+  executePeer('git add .'); executePeer('git commit -m "协作者独立修改"');
+  peer.editFile('draft.txt', '协作者未提交草稿'); executePeer('git add draft.txt');
+  const mineBefore = f.sim.snapshot(), peerBefore = peer.commandContext(f.sim).state;
+  f.withDocument(() => {
+    f.view.open();
+    assert.equal(f.view.sourceSelect.value, 'local'); assert.equal(f.view.branchSelect.value, 'branch:mine');
+    assert.match(f.view.actorBadge.textContent, /我的本地视角/);
+    assert.equal(f.view.sourceSelect.children.find(option => option.value === 'local').textContent, '我的本地仓库');
+    f.view.navigate('mine.txt'); f.view.closeButton.fire('click');
+    actor = 'remote'; f.view.open();
+    assert.equal(f.view.sourceSelect.value, 'local'); assert.equal(f.view.branchSelect.value, 'branch:dev');
+    assert.match(f.view.actorBadge.textContent, /协作者视角/); assert.match(f.view.hint.textContent, /协作者本地/);
+    assert.equal(f.view.sourceSelect.children.find(option => option.value === 'local').textContent, '协作者本地仓库');
+    assert.ok(f.all().some(item => item.attributes['aria-label'] === '查看文件 peer.txt'));
+    assert.ok(!f.all().some(item => /查看文件 (mine|draft)\.txt/.test(item.attributes['aria-label'] || '')));
+    f.view.navigate('peer.txt'); f.view.closeButton.fire('click');
+    actor = 'local'; f.view.open();
+    assert.equal(f.view.model.file, 'mine.txt'); assert.equal(f.view.branchSelect.value, 'branch:mine');
+    assert.ok(f.all().some(item => item.className === 'repo-line-text' && item.textContent === '我的未推送提交'));
+    f.view.closeButton.fire('click'); actor = 'remote'; f.view.open();
+    assert.equal(f.view.model.file, 'peer.txt'); assert.equal(f.view.branchSelect.value, 'branch:dev');
+    assert.ok(f.all().some(item => item.className === 'repo-line-text' && item.textContent === '协作者未推送提交'));
+  });
+  assert.deepEqual(f.sim.snapshot(), mineBefore); assert.deepEqual(peer.commandContext(f.sim).state, peerBefore);
+});
+
+test('浏览共享远程与各自跟踪引用时遵循 push 和 fetch 边界，不暗中同步仓库', () => {
+  let actor = 'local', peer;
+  const f = fixture(sim => ({ actor, state: actor === 'remote' ? peer.commandContext(sim).state : sim.state }));
+  peer = new RemoteWorkspace('main', f.sim.state.remote.commits[f.sim.state.remote.branches.main], f.sim.state.remote);
+  const executePeer = command => { const result = peer.execute(f.sim, command); assert.equal(result.ok, true, result.output); };
+  const initial = f.sim.headId(); peer.editFile('shared.txt', '共享的新文件\n');
+  executePeer('git add .'); executePeer('git commit -m "准备共享文件"');
+  f.withDocument(() => {
+    actor = 'remote'; f.view.open();
+    f.view.sourceSelect.value = 'remote'; f.view.sourceSelect.fire('change');
+    assert.ok(!f.all().some(item => item.attributes['aria-label'] === '查看文件 shared.txt'));
+    assert.match(f.view.hint.textContent, /push/); f.view.closeButton.fire('click');
+    executePeer('git push'); const published = peer.baseId;
+    actor = 'local'; f.view.open();
+    f.view.sourceSelect.value = 'remote'; f.view.sourceSelect.fire('change');
+    assert.equal(f.view.model.read(f.sim.state).commit.id, published);
+    assert.ok(f.all().some(item => item.attributes['aria-label'] === '查看文件 shared.txt'));
+    f.view.sourceSelect.value = 'tracking'; f.view.sourceSelect.fire('change');
+    assert.equal(f.view.model.read(f.sim.state).commit.id, initial); assert.match(f.view.hint.textContent, /我的本地记录/);
+    f.view.closeButton.fire('click'); actor = 'remote'; f.view.open();
+    assert.equal(f.view.sourceSelect.value, 'remote');
+    f.view.sourceSelect.value = 'tracking'; f.view.sourceSelect.fire('change');
+    assert.equal(f.view.model.read(peer.commandContext(f.sim).state).commit.id, published);
+    assert.match(f.view.hint.textContent, /协作者本地记录/); f.view.closeButton.fire('click');
+    actor = 'local'; f.view.open();
+    assert.equal(f.view.sourceSelect.value, 'tracking'); assert.equal(f.sim.state.tracking.main, initial);
+    f.view.closeButton.fire('click'); run(f.sim, 'git fetch'); f.view.open();
+    assert.equal(f.view.model.read(f.sim.state).commit.id, published); assert.equal(f.sim.headId(), initial);
+    f.view.sourceSelect.value = 'local'; f.view.sourceSelect.fire('change');
+    assert.ok(!f.all().some(item => item.attributes['aria-label'] === '查看文件 shared.txt'));
+    f.view.closeButton.fire('click'); run(f.sim, 'git pull --no-rebase'); f.view.open();
+    assert.ok(f.all().some(item => item.attributes['aria-label'] === '查看文件 shared.txt'));
+  });
+});
+
+test('身份浏览支持分离 HEAD，场景重置同时清空双方位置并恢复当前身份本地视图', () => {
+  let actor = 'local', peer;
+  const f = fixture(sim => ({ actor, state: actor === 'remote' ? peer.commandContext(sim).state : sim.state }));
+  const initPeer = () => { peer = new RemoteWorkspace('main', f.sim.state.remote.commits[f.sim.state.remote.branches.main], f.sim.state.remote); };
+  initPeer();
+  f.withDocument(() => {
+    f.view.open(); f.view.navigate('README.md'); f.view.closeButton.fire('click');
+    assert.equal(peer.execute(f.sim, 'git checkout HEAD~1').ok, true);
+    actor = 'remote'; f.view.open(); assert.equal(f.view.branchSelect.value, 'head:');
+    f.view.navigate('hello.txt'); f.view.sourceSelect.value = 'tracking'; f.view.sourceSelect.fire('change');
+    f.sim.loadScene('basic'); initPeer(); f.view.reset();
+    assert.equal(f.view.model.file, null); assert.equal(f.view.sourceSelect.value, 'local');
+    assert.equal(f.view.branchSelect.value, 'branch:main'); assert.match(f.view.actorBadge.textContent, /协作者视角/);
+    f.view.closeButton.fire('click'); actor = 'local'; f.view.open();
+    assert.equal(f.view.model.file, null); assert.equal(f.view.sourceSelect.value, 'local');
+    assert.equal(f.view.branchSelect.value, 'branch:main');
   });
 });
 
