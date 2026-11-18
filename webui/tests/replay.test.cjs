@@ -54,31 +54,30 @@ function fixture({ reduced = false, collaborator = false } = {}) {
   return { ...context.controls, context, $, body, panel, draws, fileAnimations, timers, result, current, saved, advance, elapse: ms => { clock += ms; } };
 }
 
-test('变化前保持五秒才显示结果，结果再停留五秒，倒计时不改变仓库', () => {
+test('只在变化前保持 2.5 秒，显示结果后立即结束，按钮不标注时间', () => {
   const f = fixture(); f.panel.classList.add('file-flowing'); f.$('flow').classList.add('flash'); f.replay();
   assert.deepEqual(f.draws[0].state, f.result.before);
-  assert.match(f.$('replay-status').textContent, /变化前状态.*5 秒后/);
+  assert.match(f.$('replay-status').textContent, /变化前状态/);
   assert.equal(f.panel.classList.contains('file-flowing'), false);
   assert.equal(f.$('flow').classList.contains('flash'), false);
   assert.equal(f.$('replay').disabled, false); // 播放时仍可停止。
-  f.advance(1000); assert.match(f.$('replay-status').textContent, /变化前状态.*4 秒后/);
-  f.advance(3999); assert.equal(f.draws.length, 1);
-  assert.match(f.$('replay-status').textContent, /变化前状态.*1 秒后/);
+  f.advance(2499); assert.equal(f.draws.length, 1);
+  assert.equal(f.$('replay-status').hidden, false);
   f.advance(1); assert.deepEqual(f.draws[1].state, f.result.after);
   assert.equal(f.draws[1].options.animate, true);
   assert.equal(f.draws[1].options.animationDuration, undefined);
-  assert.match(f.$('replay-status').textContent, /变化后状态.*5 秒/);
   assert.equal(f.fileAnimations.length, 1);
-  f.advance(1000); assert.match(f.$('replay-status').textContent, /变化后状态.*4 秒/);
-  f.advance(3999); assert.equal(f.$('replay-status').hidden, false);
   assert.equal(f.draws.length, 2);
-  f.advance(1); assert.equal(f.$('replay-status').hidden, true);
+  assert.equal(f.$('replay-status').hidden, true);
   assert.equal(f.$('replay').attributes['aria-pressed'], 'false');
-  assert.match(f.$('replay').textContent, /前后各 5 秒/);
+  assert.equal(f.$('replay').textContent, '▷ 重播变化');
+  assert.equal(f.$('replay').disabled, false);
+  assert.equal(f.$('graph-stage').classList.contains('replaying'), false);
   assert.equal(f.timers.size, 0); assert.deepEqual(f.current, f.saved);
+  f.advance(10000); assert.equal(f.draws.length, 2);
 });
 
-for (const elapsed of [500, 4000, 9000]) test('在第 ' + elapsed + ' 毫秒取消后恢复当前视图，旧回调不会覆盖新场景', () => {
+for (const elapsed of [500, 1500, 2499]) test('在第 ' + elapsed + ' 毫秒取消后恢复当前视图，旧回调不会覆盖新场景', () => {
   const f = fixture(); f.replay(); f.advance(elapsed); f.cancelReplay();
   assert.deepEqual(f.draws.at(-1).state, f.current);
   assert.equal(f.body.classList.contains('replay-active'), false);
@@ -96,31 +95,28 @@ test('重复点击先停止，再次点击从起点完整播放', () => {
   f.advance(10000); assert.equal(f.timers.size, 0);
 });
 
-test('减少动画只关闭运动效果，保留前后各五秒的静态观察时间', () => {
+test('减少动画只关闭运动效果，保留变化前 2.5 秒观察时间', () => {
   const f = fixture({ reduced: true }); f.replay();
   assert.deepEqual(f.draws.at(-1).state, f.result.before);
-  f.advance(4999); assert.equal(f.draws.length, 1);
+  f.advance(2499); assert.equal(f.draws.length, 1);
   f.advance(1); assert.deepEqual(f.draws.at(-1).state, f.result.after);
   assert.equal(f.draws.at(-1).options.animate, false);
   assert.equal(f.fileAnimations.length, 0);
-  f.advance(4999); assert.equal(f.$('replay-status').hidden, false);
-  f.advance(1); assert.equal(f.timers.size, 0);
+  assert.equal(f.timers.size, 0);
   assert.equal(f.$('replay-status').hidden, true); assert.deepEqual(f.current, f.saved);
 });
 
-test('后台延迟回调恢复时直接显示到期结果，并保留完整的结果观察时间', () => {
+test('后台延迟回调恢复时直接显示到期结果，不补等也不增加结果停留', () => {
   const f = fixture(); f.replay(); f.elapse(7000); f.advance(0);
   assert.deepEqual(f.draws.at(-1).state, f.result.after);
-  assert.match(f.$('replay-status').textContent, /变化后状态.*5 秒/);
-  f.advance(4999); assert.equal(f.$('replay-status').hidden, false);
-  f.advance(1); assert.equal(f.$('replay-status').hidden, true);
+  assert.equal(f.$('replay-status').hidden, true);
   assert.equal(f.timers.size, 0); assert.deepEqual(f.current, f.saved);
 });
 
 test('协作者回放使用协作者快照，缺少成功结果时不启动', () => {
   const f = fixture({ collaborator: true }); f.replay();
   assert.deepEqual(f.draws.at(-1).state, f.result.graphBefore);
-  f.advance(5000); assert.deepEqual(f.draws.at(-1).state, f.result.graphAfter);
+  f.advance(2500); assert.deepEqual(f.draws.at(-1).state, f.result.graphAfter);
   f.cancelReplay(); assert.deepEqual(f.draws.at(-1).state, f.current);
   f.context.lastResult = null; const count = f.draws.length; f.replay();
   assert.equal(f.draws.length, count); assert.equal(f.timers.size, 0);

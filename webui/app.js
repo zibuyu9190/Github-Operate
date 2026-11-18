@@ -448,8 +448,8 @@
     if (result.ok && result.command.name !== 'log') requestAnimationFrame(() => { $('graph-stage').scrollLeft = $('graph-stage').scrollWidth; });
   }
 
-  /** 回放延时指前后状态的观察停留，不拉长节点或分支的动画。 */
-  const REPLAY_BEFORE_MS = 5000, REPLAY_AFTER_MS = 5000;
+  /** 只在变化前保留 2.5 秒观察时间，显示结果后立即结束回放。 */
+  const REPLAY_BEFORE_MS = 2500;
   const replayStatus = node('p', 'replay-status'); replayStatus.id = 'replay-status'; replayStatus.hidden = true;
   replayStatus.setAttribute('role', 'status'); $('explanation').after(replayStatus);
 
@@ -462,20 +462,8 @@
       graph.draw(graphState());
       $('flow').classList.remove('flash'); filePanel.classList.remove('file-flowing', 'commit-flowing');
     }
-    replayStatus.hidden = true; $('replay').textContent = '▷ 重播变化（前后各 5 秒）'; $('replay').setAttribute('aria-pressed', 'false');
+    replayStatus.hidden = true; $('replay').textContent = '▷ 重播变化'; $('replay').setAttribute('aria-pressed', 'false');
     if (lastResult) $('replay').disabled = false;
-  }
-
-  /** 按截止时间更新倒计时，后台标签页恢复后不累积补等每一次计时回调。 */
-  function holdReplay(duration, describe, complete) {
-    const deadline = performance.now() + duration;
-    const tick = () => {
-      const remaining = deadline - performance.now();
-      if (remaining <= 0) { complete(); return; }
-      replayStatus.textContent = describe(Math.ceil(remaining / 1000));
-      replayTimer = setTimeout(tick, Math.min(1000, remaining));
-    };
-    tick();
   }
 
   function replay() {
@@ -488,11 +476,13 @@
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     $('replay').textContent = '■ 停止重播'; $('replay').setAttribute('aria-pressed', 'true');
     $('graph-stage').classList.add('replaying'); graph.draw(before); replayStatus.hidden = false;
-    holdReplay(REPLAY_BEFORE_MS, seconds => '1 / 2 · 变化前状态 · ' + seconds + ' 秒后显示结果', () => {
+    replayStatus.textContent = '变化前状态，稍后显示结果。';
+    replayTimer = setTimeout(() => {
+      // 先结束等待，再绘制结果，避免清理时重绘并打断正常的切换动画。
+      replayTimer = null; cancelReplay();
       graph.draw(after, { animate: !reduced });
       if (!reduced) animateFiles(lastResult);
-      holdReplay(REPLAY_AFTER_MS, seconds => '2 / 2 · 变化后状态 · 再停留 ' + seconds + ' 秒', cancelReplay);
-    });
+    }, REPLAY_BEFORE_MS);
   }
 
   Object.entries(SCENES).forEach(([key, info], i) => {
@@ -735,8 +725,8 @@
       renderFiles(); message('已选择此版本，请检查内容，再 git add 并继续。');
     });
   }
-  $('replay').textContent = '▷ 重播变化（前后各 5 秒）';
-  $('replay').title = '变化前保持 5 秒，再显示变化后的图并停留 5 秒；播放时可点击停止。减少动画设置只关闭动画，保留观察时间。';
+  $('replay').textContent = '▷ 重播变化';
+  $('replay').title = '先观察变化前的图，再显示结果；播放时可点击停止。';
   $('replay').addEventListener('click', replay); $('restart').addEventListener('click', () => loadScene(sim.scene));
   $('help-button').addEventListener('click', () => $('help-dialog').showModal()); $('close-help').addEventListener('click', () => $('help-dialog').close());
   $('help-dialog').addEventListener('click', event => { if (event.target === $('help-dialog')) { const rect = $('help-dialog').getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) $('help-dialog').close(); } });
