@@ -34,6 +34,7 @@ function fixture({ reduced = false, collaborator = false } = {}) {
     graph: { draw: (state, options) => draws.push({ state: structuredClone(state), options: options && { ...options } }) },
     animateFiles: value => { fileAnimations.push(value); panel.classList.add('file-flowing'); },
     matchMedia: () => ({ matches: reduced }),
+    performance: { now: () => clock },
     setTimeout: (fn, delay) => { const id = nextId++; timers.set(id, { at: clock + delay, fn }); return id; },
     clearTimeout: id => timers.delete(id)
   });
@@ -46,34 +47,34 @@ function fixture({ reduced = false, collaborator = false } = {}) {
     while (timers.size) {
       const [id, timer] = [...timers].sort((a, b) => a[1].at - b[1].at)[0];
       if (timer.at > end) break;
-      clock = timer.at; timers.delete(id); timer.fn();
+      clock = Math.max(clock, timer.at); timers.delete(id); timer.fn();
     }
     clock = end;
   }
-  return { ...context.controls, context, $, body, panel, draws, fileAnimations, timers, result, current, saved, advance };
+  return { ...context.controls, context, $, body, panel, draws, fileAnimations, timers, result, current, saved, advance, elapse: ms => { clock += ms; } };
 }
 
-test('重播完整持续十秒，起点、六秒动画和结果阶段同步且不改变仓库', () => {
+test('变化前保持五秒才显示结果，结果再停留五秒，倒计时不改变仓库', () => {
   const f = fixture(); f.panel.classList.add('file-flowing'); f.$('flow').classList.add('flash'); f.replay();
   assert.deepEqual(f.draws[0].state, f.result.before);
-  assert.match(f.$('replay-status').textContent, /观察起点/);
+  assert.match(f.$('replay-status').textContent, /变化前状态.*5 秒后/);
   assert.equal(f.panel.classList.contains('file-flowing'), false);
   assert.equal(f.$('flow').classList.contains('flash'), false);
   assert.equal(f.$('replay').disabled, false); // 播放时仍可停止。
-  f.advance(1999); assert.equal(f.draws.length, 1);
+  f.advance(1000); assert.match(f.$('replay-status').textContent, /变化前状态.*4 秒后/);
+  f.advance(3999); assert.equal(f.draws.length, 1);
+  assert.match(f.$('replay-status').textContent, /变化前状态.*1 秒后/);
   f.advance(1); assert.deepEqual(f.draws[1].state, f.result.after);
-  assert.equal(f.draws[1].options.animationDuration, 6000);
-  assert.equal(f.body.style['--replay-effect-duration'], '6000ms');
-  assert.equal(Number.parseInt(f.body.style['--replay-pulse-duration']) * 3, 6000);
-  assert.match(f.$('replay-status').textContent, /慢速变化/);
+  assert.equal(f.draws[1].options.animate, true);
+  assert.equal(f.draws[1].options.animationDuration, undefined);
+  assert.match(f.$('replay-status').textContent, /变化后状态.*5 秒/);
   assert.equal(f.fileAnimations.length, 1);
-  f.advance(5999); assert.equal(f.draws.length, 2);
-  f.advance(1); assert.match(f.$('replay-status').textContent, /观察结果/);
-  assert.equal(f.body.classList.contains('replay-active'), false);
-  f.advance(1999); assert.equal(f.$('replay-status').hidden, false);
+  f.advance(1000); assert.match(f.$('replay-status').textContent, /变化后状态.*4 秒/);
+  f.advance(3999); assert.equal(f.$('replay-status').hidden, false);
+  assert.equal(f.draws.length, 2);
   f.advance(1); assert.equal(f.$('replay-status').hidden, true);
   assert.equal(f.$('replay').attributes['aria-pressed'], 'false');
-  assert.match(f.$('replay').textContent, /10 秒/);
+  assert.match(f.$('replay').textContent, /前后各 5 秒/);
   assert.equal(f.timers.size, 0); assert.deepEqual(f.current, f.saved);
 });
 
@@ -88,21 +89,38 @@ for (const elapsed of [500, 4000, 9000]) test('在第 ' + elapsed + ' 毫秒取�
   assert.deepEqual(f.current, f.saved);
 });
 
-test('重复点击先停止，再次点击从起点完整播放，减少动画偏好直接展示结果并说明原因', () => {
+test('重复点击先停止，再次点击从起点完整播放', () => {
   const f = fixture(); f.replay(); f.advance(1000); f.replay();
   assert.equal(f.timers.size, 0); assert.deepEqual(f.draws.at(-1).state, f.current);
   f.replay(); assert.deepEqual(f.draws.at(-1).state, f.result.before);
   f.advance(10000); assert.equal(f.timers.size, 0);
-  const reduced = fixture({ reduced: true }); reduced.replay();
-  assert.deepEqual(reduced.draws.at(-1).state, reduced.result.after);
-  assert.match(reduced.$('replay-status').textContent, /系统已开启减少动画/);
-  assert.equal(reduced.timers.size, 0); assert.equal(reduced.fileAnimations.length, 0);
+});
+
+test('减少动画只关闭运动效果，保留前后各五秒的静态观察时间', () => {
+  const f = fixture({ reduced: true }); f.replay();
+  assert.deepEqual(f.draws.at(-1).state, f.result.before);
+  f.advance(4999); assert.equal(f.draws.length, 1);
+  f.advance(1); assert.deepEqual(f.draws.at(-1).state, f.result.after);
+  assert.equal(f.draws.at(-1).options.animate, false);
+  assert.equal(f.fileAnimations.length, 0);
+  f.advance(4999); assert.equal(f.$('replay-status').hidden, false);
+  f.advance(1); assert.equal(f.timers.size, 0);
+  assert.equal(f.$('replay-status').hidden, true); assert.deepEqual(f.current, f.saved);
+});
+
+test('后台延迟回调恢复时直接显示到期结果，并保留完整的结果观察时间', () => {
+  const f = fixture(); f.replay(); f.elapse(7000); f.advance(0);
+  assert.deepEqual(f.draws.at(-1).state, f.result.after);
+  assert.match(f.$('replay-status').textContent, /变化后状态.*5 秒/);
+  f.advance(4999); assert.equal(f.$('replay-status').hidden, false);
+  f.advance(1); assert.equal(f.$('replay-status').hidden, true);
+  assert.equal(f.timers.size, 0); assert.deepEqual(f.current, f.saved);
 });
 
 test('协作者回放使用协作者快照，缺少成功结果时不启动', () => {
   const f = fixture({ collaborator: true }); f.replay();
   assert.deepEqual(f.draws.at(-1).state, f.result.graphBefore);
-  f.advance(2000); assert.deepEqual(f.draws.at(-1).state, f.result.graphAfter);
+  f.advance(5000); assert.deepEqual(f.draws.at(-1).state, f.result.graphAfter);
   f.cancelReplay(); assert.deepEqual(f.draws.at(-1).state, f.current);
   f.context.lastResult = null; const count = f.draws.length; f.replay();
   assert.equal(f.draws.length, count); assert.equal(f.timers.size, 0);

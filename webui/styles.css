@@ -23,39 +23,7 @@
 .terminal-command-error { color: #f87171; }
 .terminal-command-conflict { color: #fbbf24; }
 
-/* 时长由回放时钟注入；变化阶段持续三轮高亮，不能只延长按钮禁用时间。 */
+/* 倒计时只描述前后图形的停留时间，图形切换仍使用正常动画速度。 */
 .replay-status {
   font-weight: 600;
-}
-
-.replay-active .new-node {
-  animation: replay-node-appear var(--replay-effect-duration) linear both;
-}
-
-.replay-active .flow.flash .flow-active {
-  animation-duration: var(--replay-pulse-duration);
-  animation-iteration-count: 3;
-}
-
-.replay-active .changed-ref rect,
-.replay-active .new-node circle {
-  animation: replay-target var(--replay-pulse-duration) ease-in-out 3;
-}
-
-.replay-active .file-flowing .work-area,
-.replay-active .file-flowing .area:has(#index-file),
-.replay-active .commit-flowing .area:has(#head-file) {
-  animation-duration: var(--replay-pulse-duration);
-  animation-delay: 0s;
-  animation-iteration-count: 3;
-}
-
-@keyframes replay-node-appear {
-  from { opacity: .15; translate: 0 -12px; }
-  to { opacity: 1; translate: 0 0; }
-}
-
-@keyframes replay-target {
-  0%, 100% { stroke: #0d9488; stroke-width: 2; }
-  50% { stroke: #d97706; stroke-width: 5; }
 }
