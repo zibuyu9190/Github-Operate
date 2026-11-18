@@ -258,7 +258,11 @@
       }
       const tagPositions = new Map();
       for (const { ref, point, above, x, y, width, height } of layout.labels) {
-        const group = element('g', { class: 'branch-tag', 'data-ref': ref.key, transform: `translate(${x} ${y})` });
+        const previous = this.previousTags?.get(ref.key);
+        // 引用目标和 HEAD 身份也算变化，不能只比较坐标：同位置切分支仍需提示。
+        const changed = options.animate && !matchMedia('(prefers-reduced-motion: reduce)').matches &&
+          (!previous || previous.id !== ref.id || previous.active !== ref.active || previous.x !== x || previous.y !== y);
+        const group = element('g', { class: 'branch-tag' + (changed ? ' changed-ref' : ''), 'data-ref': ref.key, transform: `translate(${x} ${y})` });
         const endX = point.x - x + 10, endY = point.y - y + (above ? -16 : 16);
         // 指针从标签朝向节点的一侧接入，沿通道内侧绕开同节点的其他标签。
         const startY = above ? LABEL_HEIGHT - 5 : 5, bendY = point.y - y + (above ? -32 : 32);
@@ -267,11 +271,10 @@
         group.append(element('rect', { width, height: LABEL_HEIGHT, rx: 7, fill: ref.active ? '#00fa8f' : ref.color, 'stroke-dasharray': ref.small ? '4 2' : 'none' }));
         group.append(element('text', { x: width / 2, y: 17, 'text-anchor': 'middle' }, ref.text));
         if (ref.active) group.append(element('text', { class: 'head-caption', x: width / 2, y: 39, 'text-anchor': 'middle' }, state.head.branch ? 'HEAD' : '分离状态'));
-        svg.append(group); tagPositions.set(ref.key, { x, y });
-        const previous = this.previousTags?.get(ref.key);
-        if (options.animate && previous && !matchMedia('(prefers-reduced-motion: reduce)').matches && (previous.x !== x || previous.y !== y)) {
-          // 在新位置淡入提示指针变化，避免平移动画扫过已经重绘的提交连线。
-          group.animate([{ opacity: .35 }, { opacity: 1 }], { duration: options.animationDuration ?? 450, easing: 'ease-out' });
+        svg.append(group); tagPositions.set(ref.key, { x, y, id: ref.id, active: ref.active });
+        if (changed) {
+          // 慢速回放用线性淡入配合持续高亮，避免 ease-out 在开头就显得已经结束。
+          group.animate([{ opacity: .35 }, { opacity: 1 }], { duration: options.animationDuration ?? 450, easing: options.animationDuration ? 'linear' : 'ease-out' });
         }
       }
       this.previous = positions; this.previousTags = tagPositions;

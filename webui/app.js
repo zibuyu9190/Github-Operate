@@ -448,24 +448,48 @@
     if (result.ok && result.command.name !== 'log') requestAnimationFrame(() => { $('graph-stage').scrollLeft = $('graph-stage').scrollWidth; });
   }
 
-  /** 重播只切换图形视图，不重新执行命令，也不改动当前虚拟仓库。 */
-  const REPLAY_BEFORE_MS = 1000, REPLAY_EFFECT_MS = 3000;
+  /** 三阶段使用同一时钟驱动图形与 CSS；停留时间不能冒充变化动画的时长。 */
+  const REPLAY_BEFORE_MS = 2000, REPLAY_EFFECT_MS = 6000, REPLAY_AFTER_MS = 2000;
+  const replayStatus = node('p', 'replay-status'); replayStatus.id = 'replay-status'; replayStatus.hidden = true;
+  replayStatus.setAttribute('role', 'status'); $('explanation').after(replayStatus);
+
+  /** 取消时恢复真实当前视图，避免停在历史起点；从不重新执行命令或回退仓库。 */
   function cancelReplay() {
+    const wasPlaying = replayTimer !== null;
     if (replayTimer) clearTimeout(replayTimer);
     replayTimer = null; $('graph-stage').classList.remove('replaying'); document.body.classList.remove('replay-active');
+    if (wasPlaying) {
+      graph.draw(graphState());
+      $('flow').classList.remove('flash'); filePanel.classList.remove('file-flowing', 'commit-flowing');
+    }
+    replayStatus.hidden = true; $('replay').textContent = '▷ 重播变化（10 秒）'; $('replay').setAttribute('aria-pressed', 'false');
     if (lastResult) $('replay').disabled = false;
   }
 
   function replay() {
     if (!lastResult) return;
-    cancelReplay(); $('replay').disabled = true;
+    if (replayTimer !== null) { cancelReplay(); return; }
+    cancelReplay();
+    // 清掉正常命令留下的动画类，起点阶段只观察，不提前播放文件高亮。
+    $('flow').classList.remove('flash'); filePanel.classList.remove('file-flowing', 'commit-flowing');
     const before = lastResult.graphBefore || lastResult.before, after = lastResult.graphAfter || lastResult.after;
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { graph.draw(after); animateFiles(lastResult); $('replay').disabled = false; return; }
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      graph.draw(after); replayStatus.hidden = false; replayStatus.textContent = '已直接展示结果：系统已开启减少动画。'; return;
+    }
+    $('replay').textContent = '■ 停止重播'; $('replay').setAttribute('aria-pressed', 'true');
+    document.body.style.setProperty('--replay-effect-duration', REPLAY_EFFECT_MS + 'ms');
+    document.body.style.setProperty('--replay-pulse-duration', REPLAY_EFFECT_MS / 3 + 'ms');
     document.body.classList.add('replay-active'); $('graph-stage').classList.add('replaying'); graph.draw(before);
-    // 先停留观察起点，再完整播放慢速动画；第二阶段也保持可取消，避免切换场景后残留回调。
+    replayStatus.hidden = false; replayStatus.textContent = '1 / 3 · 观察起点（2 秒）';
     replayTimer = setTimeout(() => {
+      replayStatus.textContent = '2 / 3 · 慢速变化（6 秒）· 高亮新增节点、变化的分支或文件区域';
       graph.draw(after, { animate: true, animationDuration: REPLAY_EFFECT_MS }); animateFiles(lastResult);
-      replayTimer = setTimeout(cancelReplay, REPLAY_EFFECT_MS);
+      replayTimer = setTimeout(() => {
+        graph.draw(after); document.body.classList.remove('replay-active');
+        $('flow').classList.remove('flash'); filePanel.classList.remove('file-flowing', 'commit-flowing');
+        replayStatus.textContent = '3 / 3 · 观察结果（2 秒）';
+        replayTimer = setTimeout(cancelReplay, REPLAY_AFTER_MS);
+      }, REPLAY_EFFECT_MS);
     }, REPLAY_BEFORE_MS);
   }
 
@@ -709,7 +733,8 @@
       renderFiles(); message('已选择此版本，请检查内容，再 git add 并继续。');
     });
   }
-  $('replay').title = '约 4 秒：观察起点 1 秒，再展示变化 3 秒';
+  $('replay').textContent = '▷ 重播变化（10 秒）';
+  $('replay').title = '共 10 秒：起点 2 秒、慢速变化 6 秒、结果 2 秒；播放时可点击停止。系统开启减少动画时直接展示结果。';
   $('replay').addEventListener('click', replay); $('restart').addEventListener('click', () => loadScene(sim.scene));
   $('help-button').addEventListener('click', () => $('help-dialog').showModal()); $('close-help').addEventListener('click', () => $('help-dialog').close());
   $('help-dialog').addEventListener('click', event => { if (event.target === $('help-dialog')) { const rect = $('help-dialog').getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) $('help-dialog').close(); } });

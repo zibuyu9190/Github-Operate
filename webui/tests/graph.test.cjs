@@ -75,13 +75,26 @@ for (const reduced of [false, true]) test('分支移动在减少动画偏好为 
 });
 
 test('手动重播可放慢分支指针提示，正常命令与减少动画偏好保持原行为', () => {
-  for (const reduced of [false, true]) for (const duration of [undefined, 3000]) {
+  for (const reduced of [false, true]) for (const duration of [undefined, 6000]) {
     const view = renderer(reduced), sim = new Simulator('reset'); view.graph.draw(sim.state);
     sim.execute('git reset --hard HEAD~1');
     view.graph.draw(sim.state, { animate: true, animationDuration: duration });
     assert.equal(view.animationOptions.length > 0, !reduced);
     assert.ok(view.animationOptions.every(options => options.duration === (duration ?? 450)));
+    assert.ok(view.animationOptions.every(options => options.easing === (duration ? 'linear' : 'ease-out')));
   }
+});
+
+test('HEAD 在相同提交的分支间切换也持续提示变化，原样重绘不误报引用移动', () => {
+  const sim = new Simulator(), view = renderer(false);
+  sim.execute('git branch dev'); view.graph.draw(sim.state);
+  sim.execute('git switch dev'); view.graph.draw(sim.state, { animate: true, animationDuration: 6000 });
+  const tags = view.all().filter(item => item.attrs['data-ref']?.startsWith('local:'));
+  assert.equal(tags.length, 2); assert.ok(tags.every(item => item.attrs.class.includes('changed-ref')));
+  const before = view.animations.length;
+  view.graph.draw(sim.state, { animate: true, animationDuration: 6000 });
+  assert.equal(view.animations.length, before);
+  assert.ok(view.all().every(item => !item.attrs.class?.includes('changed-ref')));
 });
 
 test('fetch 前远程独有节点有区别标记，分支文本保持纯文本', () => {
