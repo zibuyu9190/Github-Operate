@@ -3,6 +3,8 @@
   const NS = 'http://www.w3.org/2000/svg';
   const NODE_RADIUS = 19, LABEL_HEIGHT = 25, LABEL_GAP = 52;
   const EDGE_CLEARANCE = 32;
+  // 主画布默认略放大，便于直接看清节点和分支标签；放大弹窗仍使用 100% 适应画布。
+  const DEFAULT_ZOOM = 1.15;
   const labelWidth = text => Math.max(54, [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 255 ? 11 : 6.8), 18));
   // 本地分支预留星号宽度，切换 HEAD 只改变标识，不推动后续提交。
   const referenceWidth = ref => labelWidth(ref.text + (ref.key.startsWith('local:') && !ref.active ? '*' : ''));
@@ -75,7 +77,7 @@
 
   /** 图中同时区分本地已知对象与虚拟远程对象；箭头由子提交指向父提交。 */
   class CommitGraph {
-    constructor(svg, onSelect) { this.svg = svg; this.onSelect = onSelect; this.zoom = 1; this.previous = new Map(); }
+    constructor(svg, onSelect) { this.svg = svg; this.onSelect = onSelect; this.zoom = DEFAULT_ZOOM; this.previous = new Map(); }
 
     references(state) {
       const refs = [
@@ -290,5 +292,6 @@
 
     setZoom(value) { this.zoom = Math.max(.6, Math.min(2.5, value)); this.resize(); }
   }
+  CommitGraph.DEFAULT_ZOOM = DEFAULT_ZOOM;
   root.CommitGraph = CommitGraph;
 })(globalThis);
