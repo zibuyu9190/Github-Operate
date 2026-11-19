@@ -204,21 +204,77 @@ function Invoke-StaticRequest {
 
 function Start-StaticServer {
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $Port)
+    $limit = 6
+    $requests = [Collections.Generic.List[object]]::new()
+    $session = [Management.Automation.Runspaces.InitialSessionState]::CreateDefault2()
+    foreach ($functionName in @('Write-HttpResponse', 'Invoke-StaticRequest')) {
+        $definition = (Get-Command -Name $functionName -CommandType Function).Definition
+        $session.Commands.Add([Management.Automation.Runspaces.SessionStateFunctionEntry]::new($functionName, $definition))
+    }
+    foreach ($entry in @{ WebRoot = $script:WebRoot; Instance = $script:Instance; Utf8 = $script:Utf8; Port = $Port }.GetEnumerator()) {
+        $session.Variables.Add([Management.Automation.Runspaces.SessionStateVariableEntry]::new($entry.Key, $entry.Value, '静态服务配置'))
+    }
+    $pool = [RunspaceFactory]::CreateRunspacePool(1, $limit, $session, $Host)
+    $accept = $null
     try {
+        $pool.Open()
         $listener.Start()
         Write-ServiceLog "START $script:Url root=$script:WebRoot"
         while ($true) {
-            $connection = $listener.AcceptTcpClient()
-            try { Invoke-StaticRequest $connection }
-            catch {
-                # 预连接取消、超时和浏览器断开属于单次请求失败，不结束后台服务。
-                if ($_.Exception -isnot [IO.IOException]) { Write-ServiceLog ('REQUEST ERROR ' + $_.Exception.Message) }
+            for ($index = $requests.Count - 1; $index -ge 0; $index--) {
+                $request = $requests[$index]
+                if (-not $request.Handle.IsCompleted) { continue }
+                try { $null = $request.Worker.EndInvoke($request.Handle) }
+                catch {
+                    # 网络读写超时或浏览器提前断开只影响单条连接。
+                    $cause = $_.Exception.GetBaseException()
+                    if ($cause -isnot [IO.IOException] -and $cause -isnot [Net.Sockets.SocketException]) {
+                        Write-ServiceLog ('REQUEST ERROR ' + $_.Exception.Message)
+                    }
+                }
+                finally {
+                    $request.Connection.Dispose()
+                    $request.Worker.Dispose()
+                    $requests.RemoveAt($index)
+                }
             }
-            finally { $connection.Dispose() }
+            # 空闲连接最多占一个工作位。工作位用完时暂停接收，等待任一请求结束。
+            if ($requests.Count -lt $limit -and $null -eq $accept) { $accept = $listener.BeginAcceptTcpClient($null, $null) }
+            if ($null -eq $accept -or -not $accept.IsCompleted) {
+                $handles = [Collections.Generic.List[Threading.WaitHandle]]::new()
+                foreach ($request in $requests) { $handles.Add($request.Handle.AsyncWaitHandle) }
+                if ($null -ne $accept) { $handles.Add($accept.AsyncWaitHandle) }
+                $null = [Threading.WaitHandle]::WaitAny($handles.ToArray())
+                continue
+            }
+            $connection = $listener.EndAcceptTcpClient($accept)
+            $accept = $null
+            $worker = [PowerShell]::Create()
+            try {
+                $worker.RunspacePool = $pool
+                $null = $worker.AddScript({
+                    param($client)
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    Invoke-StaticRequest $client
+                }.ToString()).AddArgument($connection)
+                $handle = $worker.BeginInvoke()
+                $requests.Add(@{ Worker = $worker; Connection = $connection; Handle = $handle })
+            }
+            catch {
+                $connection.Dispose()
+                $worker.Dispose()
+                throw
+            }
         }
     }
     catch { Write-ServiceLog ('SERVER ERROR ' + $_.Exception.Message); throw }
-    finally { $listener.Stop() }
+    finally {
+        $listener.Stop()
+        foreach ($request in $requests) { $request.Connection.Dispose() }
+        foreach ($request in $requests) { $request.Worker.Dispose() }
+        $pool.Dispose()
+    }
 }
 
 try {

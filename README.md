@@ -105,11 +105,18 @@ node --test webui/tests/*.test.cjs
 浏览器冒烟测试使用开发用的 Playwright 和本机 Chrome 或 Edge。在 PowerShell 7 中执行以下命令，浏览器可执行文件路径按本机安装位置填写。测试通过 `file://` 打开离线页面。
 
 ```powershell
-npm install --prefix target/webui-validation/browser-tools --cache target/webui-validation/npm-cache playwright
-$env:NODE_PATH = Join-Path $PWD 'target/webui-validation/browser-tools/node_modules'
+$validation = Join-Path $PWD 'target/webui-validation'
+New-Item -ItemType Directory -Path $validation -Force | Out-Null
+$env:TEMP = $validation
+$env:TMP = $validation
+$env:TMPDIR = $validation
+npm install --ignore-scripts --prefix (Join-Path $validation 'browser-tools') --cache (Join-Path $validation 'npm-cache') playwright
+$env:NODE_PATH = Join-Path $validation 'browser-tools/node_modules'
 $env:GIT_PLAYGROUND_CHROMIUM = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
 node --test webui/tests/browser-smoke.cjs
 ```
+
+Windows 上可执行 `node --test webui/tests/service-smoke.cjs`。该测试需 PowerShell 7，在验证目录复制静态页面和服务脚本，使用独立的回环端口验证启动、复用、并发请求和停止。
 
 命令语义参考 Git 官方的 [merge](https://git-scm.com/docs/git-merge)、[rebase](https://git-scm.com/docs/git-rebase)、[reset](https://git-scm.com/docs/git-reset)、[revert](https://git-scm.com/docs/git-revert)、[push](https://git-scm.com/docs/git-push)、[restore](https://git-scm.com/docs/git-restore)、[stash](https://git-scm.com/docs/git-stash)、[show](https://git-scm.com/docs/git-show)、[branch](https://git-scm.com/docs/git-branch)、[remote](https://git-scm.com/docs/git-remote)、[cherry-pick](https://git-scm.com/docs/git-cherry-pick)、[checkout](https://git-scm.com/docs/git-checkout)、[switch](https://git-scm.com/docs/git-switch)、[commit](https://git-scm.com/docs/git-commit)、[rm](https://git-scm.com/docs/git-rm)、[mv](https://git-scm.com/docs/git-mv)、[tag](https://git-scm.com/docs/git-tag) 和 [reflog](https://git-scm.com/docs/git-reflog) 说明。
 
