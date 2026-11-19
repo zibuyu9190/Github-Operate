@@ -192,6 +192,37 @@ for (const mode of ['--no-rebase', '--rebase']) test('协作者 fetch 不移动 
   run(sim, draft, 'git push'); assert.equal(sim.state.remote.branches.main, integrated.id);
 });
 
+for (const actor of ['我的本地', '协作者']) test(actor + '的 pull 只保留已成功执行的 fetch，拒绝整合时不改本地快照', () => {
+  const sim = new Simulator(), draft = actor === '协作者' ? workspace(sim) : null;
+  const repo = draft || sim;
+  const execute = command => draft ? draft.execute(sim, command) : sim.execute(command);
+  const state = () => draft ? draft.commandContext(sim).state : sim.snapshot();
+  const runCommand = command => assert.equal(execute(command).ok, true, command);
+  runCommand('git switch -c side');
+  repo.editFile('hello.txt', '本地修改\n'); runCommand('git add hello.txt'); runCommand('git commit -m "侧枝"');
+  runCommand('git switch main'); runCommand('git merge --no-ff side');
+  sim.simulateRemote();
+  const old = state(), shared = sim.snapshot(), remoteTip = old.remote.branches.main;
+  repo.editFile('hello.txt', '未暂存改动\n');
+  const dirty = state();
+  const rejected = execute('git pull --rebase');
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.fetchCompleted, undefined);
+  assert.deepEqual(state(), dirty);
+  repo.editFile('hello.txt', old.work['hello.txt']);
+  const fetchedState = { ...old, tracking: old.remote.branches, commits: { ...old.commits, ...old.remote.commits } };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const failed = execute('git pull --rebase');
+    assert.equal(failed.ok, false);
+    assert.equal(failed.fetchCompleted, true);
+    assert.match(failed.output, /不支持重放合并提交/);
+    assert.match(failed.explanation, /fetch 已完成/);
+    assert.equal((failed.graphAfter || failed.after).tracking.main, remoteTip);
+    assert.deepEqual(state(), fetchedState);
+    if (draft) assert.deepEqual(sim.snapshot(), shared);
+  }
+});
+
 for (const mode of ['--no-rebase', '--rebase']) for (const abort of [false, true]) test('协作者 pull ' + mode + ' 冲突可编辑、add、继续或中止，abort=' + abort, () => {
   const sim = new Simulator(), draft = workspace(sim);
   draft.editFile('hello.txt', '协作者\n'); run(sim, draft, 'git add .'); const own = run(sim, draft, 'git commit -m "协作者修改"').commitId;
@@ -201,5 +232,6 @@ for (const mode of ['--no-rebase', '--rebase']) for (const abort of [false, true
   assert.match(draft.work['hello.txt'], /<<<<<<< HEAD/); assert.equal(draft.execute(sim, 'git push').ok, false);
   if (abort) { run(sim, draft, 'git ' + operation + ' --abort'); assert.equal(draft.baseId, own); assert.equal(draft.work['hello.txt'], '协作者\n'); }
   else { draft.editFile('hello.txt', '整合结果\n'); run(sim, draft, 'git add hello.txt'); run(sim, draft, 'git ' + operation + ' --continue'); run(sim, draft, 'git push'); assert.equal(sim.state.remote.commits[draft.baseId].tree['hello.txt'], '整合结果\n'); }
+  assert.equal(draft.tracking.main, sim.state.remote.branches.main);
   assert.deepEqual(localState(sim), Object.fromEntries(Object.entries(shared).filter(([key]) => !['remote', 'nextId'].includes(key))));
 });

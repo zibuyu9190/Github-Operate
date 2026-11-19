@@ -197,14 +197,14 @@
         ahead: [...local].filter(id => !remote.has(id)).length, behind: [...remote].filter(id => !local.has(id)).length };
     }
 
-    /** 先在独立快照中执行；失败不改变任何一方，成功 commit 仅占用全局唯一的模拟编号。 */
+    /** 只发布命令成功的阶段；协作者 commit 使用全局唯一编号，独立保存在自己的仓库。 */
     execute(sim, input) {
       const before = sim.snapshot();
       try {
         const command = Commands.parse(input);
         if (command.name === 'commit' && command.message !== null && command.message.length > 200) throw new Error('请填写提交说明，最多 200 个字符。');
         const repository = this.commandRepository(sim), result = repository.execute(input);
-        if (!result.ok) return { ...result, before, after: before };
+        if (!result.ok && !result.fetchCompleted) return { ...result, before, after: before };
         const readOnly = ['status', 'log', 'show', 'diff', 'remote', 'reflog'].includes(command.name) || (['branch', 'tag', 'stash'].includes(command.name) && command.action === 'list');
         if (!readOnly) {
           this.baseId = repository.headId(); this.base = clone(repository.headTree());
@@ -234,7 +234,7 @@
     headTree() { return this.state.commits[this.headId()].tree; }
     isClean() { return same(this.headTree(), this.state.index) && same(this.state.index, this.state.work); }
 
-    /** 非法命令整体回滚；合法但产生冲突的命令保留中间状态，等待用户解决。 */
+    /** 非法命令整体回滚；冲突暂停和 pull 已完成的 fetch 阶段保留各自的状态。 */
     execute(input) {
       const before = this.snapshot();
       try {
@@ -247,6 +247,7 @@
           throw new Error('当前处于 ' + this.state.pending.type + ' 处理中，请先解决并继续，或使用对应的 --abort。');
         }
         const result = this.dispatch(command);
+        if (result.ok === false) return { command, before, after: this.snapshot(), ...result };
         // reflog 只记录 HEAD 更新，查看、文件编辑、失败命令及远程变化不伪装成移动记录。
         const previousId = before.head.branch ? before.branches[before.head.branch] : before.head.id;
         const nextId = this.headId();
@@ -838,8 +839,20 @@
       const branch = c.branch || this.state.upstreams[this.state.head.branch];
       if (!branch || !own(this.state.remote.branches, branch)) throw new Error('没有有效的上游分支，请明确输入 git pull origin main。');
       this.fetch();
-      const result = c.rebase ? this.rebase({ ref: 'origin/' + branch }) : this.merge({ ref: 'origin/' + branch });
-      return { ...result, explanation: 'pull 已先执行 fetch，再执行 ' + (c.rebase ? 'rebase' : 'merge（本练习默认配置）') + '。' + result.explanation };
+      // fetch 已经更新对象与跟踪引用；整合出错时仅恢复到 fetch 完成后的快照。
+      const fetched = this.snapshot();
+      try {
+        const result = c.rebase ? this.rebase({ ref: 'origin/' + branch }) : this.merge({ ref: 'origin/' + branch });
+        return { ...result, explanation: 'pull 已先执行 fetch，再执行 ' + (c.rebase ? 'rebase' : 'merge（本练习默认配置）') + '。' + result.explanation };
+      } catch (error) {
+        this.state = fetched;
+        return {
+          ok: false,
+          fetchCompleted: true,
+          output: error.message,
+          explanation: 'fetch 已完成并更新本地远程跟踪引用。整合失败，当前分支、暂存区和工作区保持原样。'
+        };
+      }
     }
 
     push(c) {
