@@ -11,6 +11,31 @@ const run = (sim, draft, command) => {
 };
 const localState = sim => Object.fromEntries(Object.entries(sim.snapshot()).filter(([key]) => !['remote', 'nextId'].includes(key)));
 
+test('协作者选择删除处理冲突时，文件列表和推荐保留路径直到暂存', () => {
+  const sim = new Simulator(), draft = workspace(sim);
+  const command = command => run(sim, draft, command);
+  command('git branch other');
+  command('git rm hello.txt'); command('git commit -m "删除问候"');
+  command('git switch other');
+  draft.editFile('hello.txt', '修改问候\n');
+  command('git add hello.txt'); command('git commit -m "修改问候"');
+  command('git switch main');
+  const local = localState(sim);
+  for (const pathspec of ['hello.txt', '.']) {
+    assert.equal(command('git merge other').conflict, true);
+    draft.deleteFile('hello.txt');
+    assert.deepEqual(draft.fileStatus().find(file => file.path === 'hello.txt'),
+      { path: 'hello.txt', staged: false, unstaged: false, untracked: false, deleted: true, conflict: true });
+    assert.ok(recommend(draft.commandContext(sim)).some(item => item.command === 'git add hello.txt'));
+    command('git add ' + pathspec);
+    assert.ok(recommend(draft.commandContext(sim)).some(item => item.command === 'git merge --continue'));
+    command('git merge --continue');
+    assert.equal(Object.hasOwn(draft.base, 'hello.txt'), false);
+    assert.deepEqual(localState(sim), local);
+    command('git reset --hard HEAD^');
+  }
+});
+
 test('协作者先 commit 保存到自己的本地，再 push 发布；我的本地暂存、HEAD 和跟踪不变', () => {
   const sim = new Simulator();
   assert.equal(sim.execute('git switch -c dev').ok, true);

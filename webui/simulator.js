@@ -9,6 +9,26 @@
   const lines = text => (text || '').match(/[^\n]*\n|[^\n]+$/g) || [];
   const put = (tree, path, text) => { if (text === undefined) delete tree[path]; else tree[path] = text; };
 
+  /** 保留删除后已不在三个快照中的冲突路径，直到用户暂存解决结果。 */
+  function pathsWithConflicts(pending, ...trees) {
+    const paths = keys(...trees);
+    return pending?.unresolved.length ? [...new Set([...paths, ...pending.unresolved])].sort() : paths;
+  }
+
+  function describeFiles(head, index, work, pending) {
+    return pathsWithConflicts(pending, head, index, work).map(path => {
+      const conflict = Boolean(pending?.unresolved.includes(path));
+      return {
+        path,
+        staged: value(head, path) !== value(index, path),
+        unstaged: value(index, path) !== value(work, path),
+        untracked: !conflict && !own(head, path) && !own(index, path) && own(work, path),
+        deleted: !own(work, path),
+        conflict
+      };
+    });
+  }
+
   /** 普通文件快照不能同时包含文件及其子路径，避免恢复操作留下无法编辑的目录冲突。 */
   function checkTreePaths(tree) {
     const paths = Object.keys(tree);
@@ -134,8 +154,9 @@
       delete this.work[path];
     }
     stage(paths) {
-      const targets = paths === '.' ? keys(this.base, this.index, this.work) : paths;
-      if (!Array.isArray(targets) || targets.some(path => !keys(this.base, this.index, this.work).includes(path))) throw new Error('请选择存在的文件或待暂存的删除。');
+      const all = pathsWithConflicts(this.pending, this.base, this.index, this.work);
+      const targets = paths === '.' ? all : paths;
+      if (!Array.isArray(targets) || targets.some(path => !all.includes(path))) throw new Error('请选择存在的文件或待暂存的删除。');
       for (const path of targets) {
         put(this.index, path, value(this.work, path));
         if (this.pending) this.pending.unresolved = this.pending.unresolved.filter(item => item !== path);
@@ -143,7 +164,7 @@
       if (this.pending?.type === 'stash' && !this.pending.unresolved.length) this.pending = null;
     }
     fileStatus() {
-      return keys(this.base, this.index, this.work).map(path => ({ path, staged: value(this.base, path) !== value(this.index, path), unstaged: value(this.index, path) !== value(this.work, path), untracked: !own(this.base, path) && !own(this.index, path) && own(this.work, path), deleted: !own(this.work, path), conflict: Boolean(this.pending?.unresolved.includes(path)) }));
+      return describeFiles(this.base, this.index, this.work, this.pending);
     }
     isClean() { return same(this.base, this.index) && same(this.index, this.work); }
     /** 复用同一引擎的提交、推送和整合语义，不借用“我的本地”的对象或引用。 */
@@ -356,14 +377,7 @@
     }
 
     fileStatus() {
-      return keys(this.headTree(), this.state.index, this.state.work).map(path => ({
-        path,
-        staged: value(this.headTree(), path) !== value(this.state.index, path),
-        unstaged: value(this.state.index, path) !== value(this.state.work, path),
-        untracked: !own(this.headTree(), path) && !own(this.state.index, path) && own(this.state.work, path),
-        deleted: !own(this.state.work, path),
-        conflict: Boolean(this.state.pending?.unresolved.includes(path))
-      }));
+      return describeFiles(this.headTree(), this.state.index, this.state.work, this.state.pending);
     }
 
     status() {
@@ -383,7 +397,7 @@
           else if (f.unstaged) output.push((f.deleted ? '工作区删除  ' : '未暂存      ') + f.path);
         }
       }
-      if (this.isClean()) output.push('工作区干净，没有待提交的更改。');
+      if (!this.state.pending?.unresolved.length && this.isClean()) output.push('工作区干净，没有待提交的更改。');
       return { output: output.join('\n'), explanation: 'status 只查看状态。工作区、暂存区和提交是三个独立的快照。' };
     }
 
@@ -402,7 +416,8 @@
     diff(cached) {
       const a = cached ? this.headTree() : this.state.index, b = cached ? this.state.index : this.state.work;
       const output = [];
-      for (const path of keys(a, b)) {
+      const paths = cached ? pathsWithConflicts(this.state.pending, a, b) : keys(a, b);
+      for (const path of paths) {
         const unresolved = this.state.pending?.unresolved.includes(path);
         if (cached && unresolved) { output.push('* 未合并路径：' + path); continue; }
         if (value(a, path) === value(b, path) || (!cached && !own(a, path) && !unresolved)) continue;
@@ -520,7 +535,7 @@
     }
 
     add(paths) {
-      const all = keys(this.state.index, this.state.work, this.headTree());
+      const all = pathsWithConflicts(this.state.pending, this.state.index, this.state.work, this.headTree());
       const selected = paths.includes('.') ? all : [...new Set(paths)];
       for (const path of paths.filter(path => path !== '.')) { validPath(path); if (!all.includes(path)) throw new Error('找不到文件：' + path); }
       for (const path of selected) { validPath(path); if (!all.includes(path)) throw new Error('找不到文件：' + path); }

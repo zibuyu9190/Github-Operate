@@ -88,6 +88,30 @@ function fixture(t) {
   return { directory, sim, git, edit, remove, command, commit, assertState };
 }
 
+test('真实 Git 对照：删除与修改冲突可用指定路径或 add . 暂存删除', t => {
+  const f = fixture(t);
+  f.command('branch', 'other');
+  f.remove('hello.txt'); f.commit('删除问候');
+  f.command('switch', 'other');
+  f.edit('hello.txt', '另一方修改\n'); f.commit('修改问候');
+  for (const [branch, target, pathspec] of [['main', 'other', 'hello.txt'], ['other', 'main', '.']]) {
+    f.command('switch', branch);
+    assert.equal(f.command('merge', target).conflict, true);
+    assert.match(f.command('diff', '--cached').output, /未合并路径：hello\.txt/);
+    f.remove('hello.txt');
+    const status = f.command('status').output;
+    assert.match(status, /冲突待解决\s+hello\.txt/);
+    assert.doesNotMatch(status, /工作区干净/);
+    f.command('add', pathspec);
+    assert.deepEqual(f.sim.state.pending.unresolved, []);
+    assert.equal(f.git(['ls-files', '-u']).stdout, '');
+    f.command('merge', '--continue');
+    assert.equal(Object.hasOwn(f.sim.headTree(), 'hello.txt'), false);
+    f.assertState();
+    f.command('reset', '--hard', 'HEAD^');
+  }
+});
+
 test('真实 Git 对照：逐文件及目录的最近提交在分叉、合并、删除与重建后保持准确', t => {
   const f = fixture(t);
   const check = paths => {
