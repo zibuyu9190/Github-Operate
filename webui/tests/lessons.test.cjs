@@ -53,9 +53,23 @@ test('分支整合：merge 与 rebase 两条完整路径均通过，各路径有
   for (const route of LESSONS.branches.routes) {
     const f = fixture('branches', route.id);
     for (const step of route.steps) f.run(step.command);
-    f.pass(); f.practice.route = route.id === 'merge' ? 'rebase' : 'merge'; assert.equal(f.result().complete, false);
+    f.pass();
+    f.run('git branch -d bugFix');
+    f.pass();
+    f.practice.route = route.id === 'merge' ? 'rebase' : 'merge';
+    assert.equal(f.result().complete, false);
   }
   const f = fixture('branches'); f.run('git reset --hard bugFix'); assert.equal(f.result().complete, false);
+});
+
+test('分支整合：rebase 路线删除分支后仍要求实际变基，摘取提交不能代替', () => {
+  const f = fixture('branches', 'rebase');
+  f.run('git cherry-pick bugFix');
+  f.run('git switch bugFix');
+  f.run('git reset --hard main');
+  f.run('git switch main');
+  f.run('git branch -d bugFix');
+  assert.equal(f.result().complete, false);
 });
 
 test('冲突：触发、编辑、add、continue 分阶段检查，保留任一方也是有效解决', () => {

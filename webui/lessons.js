@@ -19,8 +19,8 @@
     branches: {
       goal: '把 bugFix 的问候修复与 main 的使用说明整合到 main。可分别用 merge 与 rebase 比较提交图。',
       routes: [
-        { id: 'merge', title: '方案一：merge 汇合', expected: 'main 指向一个双亲合并提交，原来两条分支的提交仍保留；bugFix 标签不移动。', steps: [command('git switch main'), command('git merge bugFix'), command('git log --oneline --graph --all'), command('git status')] },
-        { id: 'rebase', title: '方案二：rebase 后快进 main', expected: 'bugFix 的修复重放到 main 后，产生新 ID；最后 main 快进到 bugFix，两者指向同一个普通提交。', steps: [command('git switch bugFix'), command('git rebase main'), command('git switch main'), command('git merge bugFix'), command('git log --oneline --graph --all'), command('git status')] }
+        { id: 'merge', title: '方案一：merge 汇合', expected: 'main 指向一个双亲合并提交，原来两条分支的提交仍保留。合并后可以删除 bugFix。', steps: [command('git switch main'), command('git merge bugFix'), command('git log --oneline --graph --all'), command('git status')] },
+        { id: 'rebase', title: '方案二：rebase 后快进 main', expected: 'bugFix 的修复重放到 main 后，产生新 ID；main 快进到该提交后，可以删除 bugFix。', steps: [command('git switch bugFix'), command('git rebase main'), command('git switch main'), command('git merge bugFix'), command('git log --oneline --graph --all'), command('git status')] }
       ]
     },
     conflict: {
@@ -79,6 +79,7 @@
     constructor(scene, baseline, route) {
       if (!LESSONS[scene]) throw new Error('未知练习场景。');
       this.scene = scene; this.baseline = clone(baseline); this.sawConflict = false; this.resetEvidence = null;
+      this.replayedFeature = null;
       this.route = LESSONS[scene].routes.some(item => item.id === route) ? route : LESSONS[scene].routes[0].id;
     }
 
@@ -87,6 +88,12 @@
       if (!result.ok || !result.command) return;
       if (result.command.name === 'merge' && result.conflict) this.sawConflict = true;
       if (result.command.name === 'reset') this.resetEvidence = { mode: result.command.mode, target: headId(result.after) };
+      // 分支清理后仍可用实际完成的变基提交验证快进路线。
+      if (this.scene === 'branches' && result.command.name === 'rebase' && !result.after.pending) {
+        const source = result.before.branches.bugFix, tip = result.after.branches.bugFix;
+        const branch = result.before.pending?.branch || result.before.head.branch;
+        if (branch === 'bugFix' && source === this.baseline.branches.bugFix && tip !== source) this.replayedFeature = tip;
+      }
     }
 
     evaluate(state, dirty = false) {
@@ -106,10 +113,11 @@
       } else if (this.scene === 'branches') {
         if (this.route === 'merge') {
           add('main 汇合原来的两条历史', hasMerge(main) && ancestors(state, main).has(oldMain) && ancestors(state, main).has(oldFeature), '在 main 上执行 git merge bugFix，形成双亲提交。');
-          add('bugFix 标签保持原位', feature === oldFeature, '本方案不需要移动 bugFix；比较其他方案前请重置场景。');
+          add('bugFix 保持原位或已清理', feature === oldFeature || !feature && ancestors(state, main).has(oldFeature), '本方案合并原 bugFix 的历史，合并后可以删除该分支。');
         } else {
-          add('bugFix 已重放到原 main 之上', replayedOnto(state, feature, oldMain, oldFeature), '先切换 bugFix，再执行 git rebase main。');
-          add('main 已快进到变基后的 bugFix', main === feature && main !== oldMain, '切回 main，执行 git merge bugFix 完成快进。');
+          const replayed = feature ?? this.replayedFeature;
+          add('bugFix 已重放到原 main 之上', replayedOnto(state, replayed, oldMain, oldFeature), '先切换 bugFix，再执行 git rebase main。');
+          add('main 已快进到变基后的提交', main === replayed && main !== oldMain, '切回 main，执行 git merge bugFix 完成快进。');
         }
         add('main 保留问候修复与使用说明', expectedFiles, '检查 main 中 hello.txt、README.md 和 notes.txt。');
         add('回到 main，工作区干净', state.head.branch === 'main' && clean, '切回 main，并处理尚未提交的改动。');
