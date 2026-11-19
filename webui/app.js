@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const { Simulator, RemoteWorkspace, SCENES, edits } = GitSimulator;
+  const { Simulator, RemoteWorkspace, SCENES, edits, hasConflictMarkers } = GitSimulator;
   const $ = id => document.getElementById(id);
   const node = (tag, className, text) => { const item = document.createElement(tag); if (className) item.className = className; if (text !== undefined) item.textContent = text; return item; };
   const sim = new Simulator();
@@ -127,7 +127,14 @@
   }
 
   function commitRemoteEditor() {
-    const session = remoteSession(); if (session) runRemoteAction('git commit -m ' + JSON.stringify(session.message));
+    const session = remoteSession();
+    if (!session) return;
+    if (!session.message.trim()) {
+      message('请填写提交说明。', true);
+      remoteMessage.focus();
+      return;
+    }
+    runRemoteAction('git commit -m ' + JSON.stringify(session.message));
   }
 
   /** 按钮与命令行复用相同执行入口，避免按钮提交和终端提交出现不同语义。 */
@@ -306,11 +313,13 @@
     localModeButton.setAttribute('aria-pressed', String(!remote)); remoteModeButton.setAttribute('aria-pressed', String(remote));
     filePanel.classList.toggle('editing-remote', remote); remoteToolbar.hidden = !remote; remoteActions.hidden = !remote;
     $('files-title').replaceChildren(node('span', 'section-dot green'), document.createTextNode(remote ? '文件与三个区域 · 模拟协作者' : '文件与三个区域 · 我的本地'));
+    const indexArea = $('index-file').closest('.area');
+    const headArea = $('head-file').closest('.area');
     document.querySelector('.work-area .area-heading > span').textContent = remote ? 'WORKTREE · 协作者编辑' : 'WORKTREE · 直接编辑';
-    document.querySelector('.index-area .area-heading > span').textContent = remote ? 'INDEX · 协作者暂存快照' : 'INDEX · git add 快照';
-    document.querySelector('.head-area .area-heading > span').textContent = remote ? '协作者 HEAD · ' + (remoteBranch || '') : 'HEAD · 已提交快照';
-    document.querySelector('.index-area .area-footer').textContent = remote ? '相对协作者 HEAD：绿色为新增，红色为删除' : '相对 HEAD：绿色为新增，红色为删除';
-    document.querySelector('.head-area .area-footer').textContent = remote ? '协作者本地最近一次提交；push 后才发布到共享远程' : '最近一次 git commit 保存的内容';
+    indexArea.querySelector('.area-heading > span').textContent = remote ? 'INDEX · 协作者暂存快照' : 'INDEX · git add 快照';
+    headArea.querySelector('.area-heading > span').textContent = remote ? '协作者 HEAD · ' + (remoteBranch || '') : 'HEAD · 已提交快照';
+    indexArea.querySelector('.area-footer').textContent = remote ? '相对协作者 HEAD：绿色为新增，红色为删除' : '相对 HEAD：绿色为新增，红色为删除';
+    headArea.querySelector('.area-footer').textContent = remote ? '协作者本地最近一次提交；push 后才发布到共享远程' : '最近一次 git commit 保存的内容';
     if (!remote) { renderLocalFiles(); return; }
     const session = remoteSession();
     if (!session) { $('file-editor').value = ''; $('file-editor').disabled = true; submitRemote.disabled = pushRemote.disabled = reloadRemote.disabled = true; remoteBase.textContent = '暂无远程分支，请先切回本地 push。'; return; }
@@ -320,19 +329,21 @@
     $('file-select').replaceChildren(...paths.map(path => { const option = node('option', '', path); option.value = path; return option; }));
     $('file-select').value = path; $('file-select').disabled = !path;
     const readFile = tree => Object.hasOwn(tree, path) ? tree[path] : undefined;
-    $('file-editor').value = session.dirty ? session.buffer : readFile(workspace.work) ?? '';
+    const work = session.dirty ? session.buffer : readFile(workspace.work);
+    $('file-editor').value = work ?? '';
     $('file-editor').disabled = !path; $('save-file').disabled = !path; $('delete-file').disabled = !Object.hasOwn(workspace.work, path);
     renderCode($('head-file'), readFile(workspace.base)); renderCode($('index-file'), readFile(workspace.index), readFile(workspace.base), true);
-    renderCode($('work-diff'), session.dirty ? session.buffer : readFile(workspace.work), readFile(workspace.index), true);
+    renderCode($('work-diff'), work, readFile(workspace.index), true);
     $('file-state').replaceChildren(node('span', '', path || '暂无文件'));
     if (status?.conflict) $('file-state').append(node('span', 'state-tag conflict', '协作者冲突待解决'));
     if (status?.staged) $('file-state').append(node('span', 'state-tag', '协作者已暂存'));
     if (session.dirty || status?.unstaged) $('file-state').append(node('span', 'state-tag dirty', session.dirty ? '协作者草稿未保存' : status.deleted ? '协作者工作区删除' : '协作者未暂存'));
-    else if (!status?.staged) $('file-state').append(node('span', 'state-tag', '协作者三个区域一致'));
+    else if (!status?.staged && !status?.conflict) $('file-state').append(node('span', 'state-tag', '协作者三个区域一致'));
+    renderFileMarkerNotice(work);
     $('editor-status').textContent = session.dirty ? '协作者草稿 · 执行命令时自动保存' : '编辑后保存到协作者工作区';
     const context = workspace.commandContext(sim), pending = workspace.pending;
-    remoteBase.textContent = '协作者本地 ' + (remoteBranch || '分离 HEAD') + ' · ' + workspace.baseId + ' ｜' + (context.actual ? '共享远程 origin/' + (context.upstream || remoteBranch) + ' · ' + context.actual + ' ｜未推送 ' + context.ahead + ' 个提交' : '当前分支尚未发布') +
-      (pending ? pending.type === 'stash' ? '。stash 恢复冲突：编辑后 add，记录仍保留；没有 --continue 或 --abort。' : '。正在 ' + pending.type + '：编辑解决冲突后 add，再 ' + pending.type + ' --continue；也可 --abort。' : !remoteBranch ? '。可用 switch -c 新分支保存提交。' : !context.upstream ? '。未设置上游；可推送并关联当前分支。' : context.behind ? '。远程还有 ' + context.behind + ' 个提交，请先保存并提交改动，再 pull 整合后 push。' : context.ahead ? '。commit 已保存；点击“推送”发布。' : '。与共享远程同步；编辑后依次 add、commit、push。');
+    remoteBase.textContent = '协作者本地 ' + (remoteBranch || '分离 HEAD') + ' · ' + workspace.baseId + ' ｜' + (context.actual ? '共享远程分支 ' + (context.upstream || remoteBranch) + ' · ' + context.actual + ' ｜相比共享远程多 ' + context.ahead + ' 个提交' : '当前分支尚未发布') +
+      (pending ? pending.type === 'stash' ? '。stash 恢复冲突：编辑后 add，记录仍保留；没有 --continue 或 --abort。' : '。正在 ' + pending.type + '：编辑解决冲突后 add，再 ' + pending.type + ' --continue；也可 --abort。' : !remoteBranch ? '。可用 switch -c 新分支保存提交。' : !context.upstream ? '。未设置上游；可推送并关联当前分支。' : context.behind ? '。相比共享远程少 ' + context.behind + ' 个提交，请先保存并提交改动，再 pull 整合后 push。' : context.ahead ? '。commit 已保存；点击“推送”发布。' : '。与共享远程同步；编辑后依次 add、commit、push。');
     remoteBase.classList.toggle('error', Boolean(context.behind || pending)); stageRemoteFile.disabled = !path; stageRemoteAll.disabled = !files.length;
     submitRemote.disabled = Boolean(pending) || !files.some(file => file.staged);
     pushRemote.disabled = Boolean(pending) || !remoteBranch || (Boolean(context.upstream) && !context.ahead); pushRemote.textContent = context.upstream ? '推送到远程 ' + context.upstream : '推送并关联 ' + (remoteBranch || '分支');
@@ -358,12 +369,20 @@
       if (state.staged) $('file-state').append(node('span', 'state-tag', '已暂存'));
       if (state.untracked) $('file-state').append(node('span', 'state-tag dirty', '未跟踪'));
       else if (state.unstaged) $('file-state').append(node('span', 'state-tag dirty', state.deleted ? '工作区删除' : '未暂存改动'));
-      const markers = /^(<<<<<<< |=======|>>>>>>> )/m.test(work || '');
-      if (markers) $('file-state').append(node('span', 'state-tag conflict', '仍有冲突标记，请检查'));
+      renderFileMarkerNotice(dirty ? localEditorText() : work);
     }
     renderConflict(sim.state, selectedFile);
     renderCode($('work-diff'), work, index, true);
     renderRecommendations(); renderLesson();
+  }
+
+  /** 警告与工作区草稿同步显示，暂存状态仍由引擎判断。 */
+  function renderFileMarkerNotice(text) {
+    const label = $('file-state');
+    const warning = label.querySelector('.file-marker-warning');
+    if (hasConflictMarkers(text)) {
+      if (!warning) label.append(node('span', 'state-tag conflict file-marker-warning', '仍有冲突标记，请检查'));
+    } else warning?.remove();
   }
 
   /** 两个身份共用冲突解释，版本选择按钮仅改动当前身份的工作区。 */
@@ -407,7 +426,7 @@
       });
     }
     if (result.ok && result.actor === 'remote' && result.command?.name === 'push') {
-      ['协作者本地提交', '→', '共享远程 · origin/' + result.branch, '· 我的本地尚未 fetch'].forEach((text, i) => $('flow').append(node('span', i === 2 ? 'flow-active' : '', text)));
+      ['协作者本地提交', '→', '共享远程分支 ' + result.branch, '· 我的本地尚未 fetch'].forEach((text, i) => $('flow').append(node('span', i === 2 ? 'flow-active' : '', text)));
     }
     if (result.ok && result.command?.name === 'restore') {
       const labels = result.command.staged ? ['HEAD', '→', '暂存区', '· 工作区保留'] : ['暂存区', '→', '工作区', '· 丢弃未暂存修改'];
@@ -680,6 +699,7 @@
     assistant.refresh(false);
   });
   $('file-editor').addEventListener('input', () => {
+    renderFileMarkerNotice($('file-editor').value);
     if (editorMode === 'remote') { const session = remoteSession(); if (session) { session.buffer = $('file-editor').value; session.dirty = true; $('editor-status').textContent = '协作者草稿 · 执行命令时自动保存'; renderRecommendations(); } return; }
     dirty = true; $('editor-status').textContent = '编辑草稿 · 执行命令时自动保存'; renderRecommendations(); renderLesson();
   });
@@ -730,7 +750,11 @@
   $('replay').addEventListener('click', replay); $('restart').addEventListener('click', () => loadScene(sim.scene));
   $('help-button').addEventListener('click', () => $('help-dialog').showModal()); $('close-help').addEventListener('click', () => $('help-dialog').close());
   $('help-dialog').addEventListener('click', event => { if (event.target === $('help-dialog')) { const rect = $('help-dialog').getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) $('help-dialog').close(); } });
-  document.addEventListener('keydown', event => { if (event.key === '?' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) && !$('help-dialog').open && !graphViewer.dialog.open) $('help-dialog').showModal(); });
+  document.addEventListener('keydown', event => {
+    if (event.key !== '?' || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+    if (document.activeElement?.closest('input, textarea, select, [contenteditable]') || document.querySelector('dialog[open]')) return;
+    $('help-dialog').showModal();
+  });
   $('zoom-in').addEventListener('click', () => graph.setZoom(graph.zoom + .2)); $('zoom-out').addEventListener('click', () => graph.setZoom(graph.zoom - .2)); $('zoom-reset').addEventListener('click', () => graph.setZoom(CommitGraph.DEFAULT_ZOOM));
   window.addEventListener('resize', () => graph.resize());
   // pagehide 也在页面进入往返缓存时清理，避免返回或恢复页面时带回旧命令。

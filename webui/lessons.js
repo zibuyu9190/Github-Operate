@@ -1,11 +1,11 @@
 /* 参考答案与验收只读取虚拟仓库；不会代替用户执行命令或改写文件。 */
 (function (root) {
   'use strict';
+  const { hasConflictMarkers } = typeof module !== 'undefined' && module.exports ? require('./simulator.js') : root.GitSimulator;
   const clone = value => JSON.parse(JSON.stringify(value));
   const headId = state => state.head.branch ? state.branches[state.head.branch] : state.head.id;
   const treeAt = (state, id) => state.commits[id]?.tree || {};
   const same = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].every(key => a[key] === b[key]);
-  const markers = text => /^(<<<<<<<(?: |$)|=======$|>>>>>>>(?: |$))/m.test(text || '');
   const command = text => ({ command: text });
   const edit = (instruction, content) => ({ instruction, content });
   const greeting = '你好，Git！\n这是一段问候。\n保留这一行作为共同上下文。\n学习从一次提交开始。\n';
@@ -117,9 +117,9 @@
         const merged = hasMerge(main) && ancestors(state, main).has(oldMain) && ancestors(state, main).has(oldFeature);
         const ready = (state.pending?.type === 'merge' && state.pending.unresolved.length === 0) || merged;
         add('已经触发本关合并冲突', this.sawConflict, '从本场景起点执行 git merge bugFix。');
-        add('冲突标记清除，解决结果已暂存', this.sawConflict && ready && typeof state.work['hello.txt'] === 'string' && !markers(state.work['hello.txt']) && same(state.index, state.work) && !dirty, '编辑 hello.txt，删除冲突标记，保存后 git add hello.txt。');
+        add('冲突标记清除，解决结果已暂存', this.sawConflict && ready && typeof state.work['hello.txt'] === 'string' && !hasConflictMarkers(state.work['hello.txt']) && same(state.index, state.work) && !dirty, '编辑 hello.txt，删除冲突标记，保存后 git add hello.txt。');
         add('main 已创建双亲合并提交', state.head.branch === 'main' && merged && !state.pending, '所有冲突暂存后执行 git merge --continue，或 git commit -m "说明"。');
-        add('合并完成，工作区干净', merged && clean && !Object.values(head).some(markers), '完成合并并检查文件中是否仍有冲突标记。');
+        add('合并完成，工作区干净', merged && clean && !Object.values(head).some(hasConflictMarkers), '完成合并并检查文件中是否仍有冲突标记。');
       } else if (this.scene === 'rebase') {
         const featureTree = treeAt(state, feature);
         add('bugFix 新提交接在原 main 后面', replayedOnto(state, feature, oldMain, oldFeature), '执行 git rebase main；使用 merge 或 reset 不能完成本关目标。');

@@ -102,6 +102,15 @@ node --test webui/tests/*.test.cjs
 
 真实 Git 对照测试还需要本机 `git` 命令；仅在 `target/webui-validation/` 中创建并清理独立临时仓库与本地裸仓库，比较文件、暂存区、引用和父子拓扑，不连接网络，也不修改开发仓库。网页本身不需要 Node.js 或 Git。
 
+浏览器冒烟测试使用开发用的 Playwright 和本机 Chrome 或 Edge。在 PowerShell 7 中执行以下命令，浏览器可执行文件路径按本机安装位置填写。测试通过 `file://` 打开离线页面。
+
+```powershell
+npm install --prefix target/webui-validation/browser-tools --cache target/webui-validation/npm-cache playwright
+$env:NODE_PATH = Join-Path $PWD 'target/webui-validation/browser-tools/node_modules'
+$env:GIT_PLAYGROUND_CHROMIUM = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+node --test webui/tests/browser-smoke.cjs
+```
+
 命令语义参考 Git 官方的 [merge](https://git-scm.com/docs/git-merge)、[rebase](https://git-scm.com/docs/git-rebase)、[reset](https://git-scm.com/docs/git-reset)、[revert](https://git-scm.com/docs/git-revert)、[push](https://git-scm.com/docs/git-push)、[restore](https://git-scm.com/docs/git-restore)、[stash](https://git-scm.com/docs/git-stash)、[show](https://git-scm.com/docs/git-show)、[branch](https://git-scm.com/docs/git-branch)、[remote](https://git-scm.com/docs/git-remote)、[cherry-pick](https://git-scm.com/docs/git-cherry-pick)、[checkout](https://git-scm.com/docs/git-checkout)、[switch](https://git-scm.com/docs/git-switch)、[commit](https://git-scm.com/docs/git-commit)、[rm](https://git-scm.com/docs/git-rm)、[mv](https://git-scm.com/docs/git-mv)、[tag](https://git-scm.com/docs/git-tag) 和 [reflog](https://git-scm.com/docs/git-reflog) 说明。
 
 ## 环境

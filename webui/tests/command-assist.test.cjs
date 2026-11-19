@@ -95,7 +95,7 @@ test('冲突建议遵循先解决、再暂存、后继续，支持中止与分�
   assert.ok(!commands(sim).some(x => /add|--continue/.test(x)));
   assert.ok(commands(sim).includes('git merge --abort'));
   assert.ok(!suggestions(sim, 'git merge --').some(x => x.label === '--continue'));
-  sim.editFile('hello.txt', '已解决\n');
+  sim.editFile('hello.txt', '已解决\n==========\n正文\n');
   assert.equal(commands(sim)[0], 'git add hello.txt');
   run(sim, 'git add hello.txt');
   assert.equal(commands(sim)[0], 'git merge --continue');

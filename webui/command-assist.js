@@ -1,6 +1,7 @@
 /* 补全和推荐只生成输入文本，不执行命令；同一数据逻辑可在 Node 中验证。 */
 (function (root) {
   'use strict';
+  const { hasConflictMarkers } = typeof module !== 'undefined' && module.exports ? require('./simulator.js') : root.GitSimulator;
   const catalog = {
     status: ['查看仓库与文件状态', 'status'],
     log: ['查看提交历史', 'log [--oneline] [--graph] [--all]'],
@@ -231,7 +232,7 @@
     const changed = files.filter(f => f.unstaged || f.conflict), staged = files.some(f => f.staged);
     const op = state.pending, current = headId(state);
     if (op) {
-      const hasMarkers = path => /^(<<<<<<< |=======|>>>>>>> )/m.test(state.work[path] || '');
+      const hasMarkers = path => hasConflictMarkers(state.work[path]);
       const remainingMarkers = Object.keys(op.conflicts).some(hasMarkers);
       const ready = changed.filter(f => !hasMarkers(f.path));
       if (ready.length) add('git add ' + ready.map(f => quote(f.path)).join(' '), '检查解决结果后，将这些文件标记为已解决');

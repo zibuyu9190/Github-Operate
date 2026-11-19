@@ -78,6 +78,11 @@
     return '<<<<<<< HEAD\n' + terminated(ours || '') + '=======\n' + terminated(theirs || '') + '>>>>>>> ' + label + '\n';
   }
 
+  /** 检测模拟器生成的标记边界，普通的更长等号分隔线不参与提示。 */
+  function hasConflictMarkers(text) {
+    return /^(?:<{7}(?:[ \t]|$)|={7}$|>{7}(?:[ \t]|$))/m.test(text || '');
+  }
+
   /** 对重叠的行级编辑组成冲突组；修改/删除单独保留三个版本供编辑器解释。 */
   function mergeText(base, ours, theirs, label) {
     if (ours === theirs) return { text: ours, conflict: false };
@@ -941,7 +946,7 @@
     reset: { title: 'Reset 对比', subtitle: '同样退一步，三个区域各不相同。', hint: '已有三次提交。分别重置场景，试试 soft、mixed、hard。', commands: ['git reset --soft HEAD~1', 'git reset --mixed HEAD~1', 'git reset --hard HEAD~1', 'git revert HEAD'] },
     remote: { title: '远程协作', subtitle: '看清本地、远程与中间的那条线。', hint: '本地和远程各有一个新提交。先 push 看拒绝原因，再 fetch、pull、push。', commands: ['git push', 'git fetch', 'git pull --no-rebase origin main', 'git push'] }
   };
-  const api = { Simulator, RemoteWorkspace, SCENES, mergeText, edits, same };
+  const api = { Simulator, RemoteWorkspace, SCENES, mergeText, hasConflictMarkers, edits, same };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.GitSimulator = api;
 })(globalThis);
