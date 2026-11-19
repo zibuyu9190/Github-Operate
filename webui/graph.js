@@ -3,8 +3,8 @@
   const NS = 'http://www.w3.org/2000/svg';
   const NODE_RADIUS = 19, LABEL_HEIGHT = 25, LABEL_GAP = 52;
   const EDGE_CLEARANCE = 32;
-  // 主画布默认略放大，便于直接看清节点和分支标签；放大弹窗仍使用 100% 适应画布。
   const DEFAULT_ZOOM = 1.15;
+  const READABLE_SCALE = .85;
   const labelWidth = text => Math.max(54, [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 255 ? 11 : 6.8), 18));
   // 本地分支预留星号宽度，切换 HEAD 只改变标识，不推动后续提交。
   const referenceWidth = ref => labelWidth(ref.text + (ref.key.startsWith('local:') && !ref.active ? '*' : ''));
@@ -18,18 +18,23 @@
   /** 取样只用于比较路径与障碍物；实际输出仍保留 SVG 曲线和圆角。 */
   function routePath(commands) {
     const segments = []; let point;
+    const bounds = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
+    const include = p => {
+      bounds.left = Math.min(bounds.left, p.x); bounds.right = Math.max(bounds.right, p.x);
+      bounds.top = Math.min(bounds.top, p.y); bounds.bottom = Math.max(bounds.bottom, p.y);
+    };
     for (const [type, ...values] of commands) {
       const controls = [];
       for (let i = 0; i < values.length; i += 2) controls.push({ x: values[i], y: values[i + 1] });
-      if (type === 'M') { point = controls[0]; continue; }
+      if (type === 'M') { point = controls[0]; include(point); continue; }
       const curve = [point, ...controls], steps = type === 'L' ? 1 : 32;
       for (let i = 1; i <= steps; i++) {
         const t = i / steps; let sample = curve;
         while (sample.length > 1) sample = sample.slice(1).map((p, j) => ({ x: sample[j].x * (1 - t) + p.x * t, y: sample[j].y * (1 - t) + p.y * t }));
-        segments.push([point, sample[0]]); point = sample[0];
+        segments.push([point, sample[0]]); point = sample[0]; include(point);
       }
     }
-    return { path: commands.map(([type, ...values]) => type + ' ' + values.join(' ')).join(' '), segments };
+    return { path: commands.map(([type, ...values]) => type + ' ' + values.join(' ')).join(' '), segments, bounds };
   }
 
   function throughBox([a, b], box) {
@@ -77,7 +82,13 @@
 
   /** 图中同时区分本地已知对象与虚拟远程对象；箭头由子提交指向父提交。 */
   class CommitGraph {
-    constructor(svg, onSelect) { this.svg = svg; this.onSelect = onSelect; this.zoom = DEFAULT_ZOOM; this.previous = new Map(); }
+    constructor(svg, onSelect) {
+      this.svg = svg;
+      this.onSelect = onSelect;
+      this.zoom = DEFAULT_ZOOM;
+      this.fitted = false;
+      this.previous = new Map();
+    }
 
     references(state) {
       const refs = [
@@ -204,9 +215,13 @@
         }
         let best, bestScore = Infinity;
         for (const candidate of candidates) {
-          if (blockers.some(box => candidate.segments.some(segment => throughBox(segment, box)))) continue;
+          const { left, right, top, bottom } = candidate.bounds;
+          // 路径包围盒不相交时无需逐段比较；接触边界的候选仍按原规则计分。
+          if (blockers.some(box => right >= box.x && left <= box.x + box.width && bottom >= box.y && top <= box.y + box.height &&
+            candidate.segments.some(segment => throughBox(segment, box)))) continue;
           let score = candidate.segments.reduce((sum, [a, b]) => sum + Math.hypot(b.x - a.x, b.y - a.y), 0);
           for (const previous of routed) {
+            if (right < previous.bounds.left || left > previous.bounds.right || bottom < previous.bounds.top || top > previous.bounds.bottom) continue;
             let crossing = false, overlap = 0;
             for (const segment of candidate.segments) for (const other of previous.segments) {
               const contact = lineContact(segment, other); crossing ||= contact < 0; overlap += Math.max(0, contact);
@@ -224,6 +239,7 @@
     draw(state, options = {}) {
       this.state = state;
       const svg = this.svg, layout = this.layout(state), positions = layout.positions;
+      this.size = { width: layout.width, height: layout.height };
       svg.replaceChildren(); svg.setAttribute('viewBox', '0 0 ' + layout.width + ' ' + layout.height);
       const title = element('title', {}, 'Git 提交图。旧提交在左，新提交在右；箭头向左指向父提交，亮绿色标签表示当前分支。'); svg.append(title);
       const defs = element('defs');
@@ -284,13 +300,31 @@
     }
 
     resize() {
+      if (!this.size) return;
       const parent = this.svg.parentElement, width = parent.clientWidth || 600, height = parent.clientHeight || 240;
-      // viewBox 等比适应可见画布；缩放同步扩展两个轴，长历史可以横向滚动查看。
-      this.svg.style.width = width * this.zoom + 'px';
-      this.svg.style.height = height * this.zoom + 'px';
+      // 默认保留可读比例，显式适应时才缩至整图可见；两个轴始终采用相同的比例。
+      const fit = Math.min(width / this.size.width, height / this.size.height);
+      const baseline = Math.max(fit, READABLE_SCALE), scale = this.fitted ? fit : baseline * this.zoom;
+      if (this.fitted) this.zoom = fit / baseline;
+      const graphWidth = this.size.width * scale, graphHeight = this.size.height * scale;
+      const style = this.svg.style;
+      style.minWidth = '0';
+      style.width = graphWidth + 'px';
+      style.height = graphHeight + 'px';
+      style.marginLeft = Math.max(0, (width - graphWidth) / 2) + 'px';
+      style.marginTop = Math.max(0, (height - graphHeight) / 2) + 'px';
     }
 
-    setZoom(value) { this.zoom = Math.max(.6, Math.min(2.5, value)); this.resize(); }
+    setZoom(value) {
+      this.fitted = false;
+      this.zoom = Math.max(.6, Math.min(2.5, value));
+      this.resize();
+    }
+
+    fit() {
+      this.fitted = true;
+      this.resize();
+    }
   }
   CommitGraph.DEFAULT_ZOOM = DEFAULT_ZOOM;
   root.CommitGraph = CommitGraph;

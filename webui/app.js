@@ -755,7 +755,10 @@
     if (document.activeElement?.closest('input, textarea, select, [contenteditable]') || document.querySelector('dialog[open]')) return;
     $('help-dialog').showModal();
   });
-  $('zoom-in').addEventListener('click', () => graph.setZoom(graph.zoom + .2)); $('zoom-out').addEventListener('click', () => graph.setZoom(graph.zoom - .2)); $('zoom-reset').addEventListener('click', () => graph.setZoom(CommitGraph.DEFAULT_ZOOM));
+  $('zoom-in').addEventListener('click', () => graph.setZoom(graph.zoom + .2));
+  $('zoom-out').addEventListener('click', () => { if (graph.zoom > .6) graph.setZoom(graph.zoom - .2); });
+  $('zoom-reset').setAttribute('aria-label', '适应提交图画布');
+  $('zoom-reset').addEventListener('click', () => graph.fit());
   window.addEventListener('resize', () => graph.resize());
   // pagehide 也在页面进入往返缓存时清理，避免返回或恢复页面时带回旧命令。
   window.addEventListener('pagehide', clearCommandHistory);

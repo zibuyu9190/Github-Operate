@@ -121,7 +121,7 @@
       this.zoomOut = button('−', '缩小大图', () => this.zoom(this.graph.zoom - .2));
       this.zoomIn = button('＋', '放大大图', () => this.zoom(this.graph.zoom + .2));
       this.closeButton = button('✕ 关闭', '关闭放大图', () => this.dialog.close()); this.closeButton.autofocus = true;
-      tools.append(this.zoomOut, this.zoomLabel, this.zoomIn, button('适应画布', '适应大图画布', () => this.zoom(1)), this.closeButton);
+      tools.append(this.zoomOut, this.zoomLabel, this.zoomIn, button('适应画布', '适应大图画布', () => this.zoom()), this.closeButton);
       header.append(heading, tools);
       this.canvas = make('div', 'graph-viewer-canvas');
       this.details = make('details', 'graph-viewer-details');
@@ -166,7 +166,7 @@
       // 原生 close 事件可能下一帧才到达；快速重开时先归位，避免占位符留在弹窗内部。
       if (this.placeholder) this.restore();
       this.beforeOpen();
-      this.previous = { zoom: this.graph.zoom, left: this.stage.scrollLeft, top: this.stage.scrollTop, focus: document.activeElement };
+      this.previous = { zoom: this.graph.zoom, fitted: this.graph.fitted, left: this.stage.scrollLeft, top: this.stage.scrollTop, focus: document.activeElement };
       this.placeholder = document.createComment('提交图原位置'); this.stage.before(this.placeholder);
       this.canvas.append(this.stage);
       const context = this.readContext(); this.title.textContent = context.title + ' · 提交图';
@@ -177,7 +177,9 @@
     }
 
     zoom(value) {
-      this.graph.setZoom(value); this.zoomLabel.textContent = Math.round(this.graph.zoom * 100) + '%';
+      if (value === undefined) this.graph.fit();
+      else this.graph.setZoom(value);
+      this.zoomLabel.textContent = this.graph.fitted ? '适应' : Math.round(this.graph.zoom * 100) + '%';
       this.zoomOut.disabled = this.graph.zoom <= .6; this.zoomIn.disabled = this.graph.zoom >= 2.5;
     }
 
@@ -192,7 +194,9 @@
     restore() {
       if (!this.placeholder) return;
       this.placeholder.replaceWith(this.stage); this.placeholder = null;
-      document.body.classList.remove('graph-viewer-open'); this.graph.setZoom(this.previous.zoom);
+      document.body.classList.remove('graph-viewer-open');
+      if (this.previous.fitted) this.graph.fit();
+      else this.graph.setZoom(this.previous.zoom);
       this.stage.scrollLeft = this.previous.left; this.stage.scrollTop = this.previous.top;
       const focus = this.previous.focus?.isConnected ? this.previous.focus : this.trigger;
       focus.focus({ preventScroll: true });

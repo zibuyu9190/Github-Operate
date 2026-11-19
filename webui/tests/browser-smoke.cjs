@@ -111,3 +111,44 @@ test('协作者冲突提示识别标记，选择删除后仍可暂存并继续',
   await command(page, 'git merge --continue');
   assert.equal(await page.locator('#file-select option[value="hello.txt"]').count(), 0);
 });
+
+test('长历史在主画布和大图中保持可读，并可主动适应画布', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {
+    const input = document.getElementById('command');
+    const form = document.getElementById('command-form');
+    const editor = document.getElementById('file-editor');
+    for (let i = 0; i < 15; i++) {
+      editor.value = '长历史测试 ' + i + '\n';
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+      for (const text of ['git add hello.txt', 'git commit -m "测试 ' + i + '"']) {
+        input.value = text;
+        form.requestSubmit();
+      }
+    }
+  });
+  const geometry = () => page.locator('#graph').evaluate(svg => ({
+    nodes: svg.querySelectorAll('.commit-node').length,
+    scale: svg.getScreenCTM().a,
+    width: svg.parentElement.clientWidth,
+    scrollWidth: svg.parentElement.scrollWidth
+  }));
+  const main = await geometry();
+  assert.equal(main.nodes, 18);
+  assert.ok(main.scale >= .95);
+  assert.ok(main.scrollWidth > main.width * 1.5);
+  await page.locator('#graph-expand').click();
+  const expanded = await geometry();
+  assert.ok(expanded.scale >= .84);
+  assert.ok(expanded.scrollWidth > expanded.width);
+  await page.getByRole('button', { name: '适应大图画布' }).click();
+  const fitted = await geometry();
+  assert.ok(fitted.scale < expanded.scale);
+  assert.ok(fitted.scrollWidth <= fitted.width + 1);
+  await page.getByRole('button', { name: '关闭放大图' }).click();
+  await page.waitForFunction(() => document.getElementById('graph').getScreenCTM().a >= .95);
+  await page.setViewportSize({ width: 412, height: 860 });
+  await page.locator('#zoom-reset').click();
+  const mobile = await geometry();
+  assert.ok(mobile.scrollWidth <= mobile.width + 1);
+});

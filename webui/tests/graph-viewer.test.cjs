@@ -43,7 +43,11 @@ function fixture() {
   const context = vm.createContext({ document, GitSimulator: { edits }, window: { getSelection: () => ({ toString: () => '' }) } });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../graph-viewer.js'), 'utf8'), context);
   const sim = new Simulator('branches'), before = sim.snapshot(), selections = []; let prepares = 0;
-  const graph = { zoom: 1.8, onSelect: commit => selections.push(commit.id), draw() {}, resize() {}, setZoom(value) { this.zoom = Math.max(.6, Math.min(2.5, value)); } };
+  const graph = {
+    zoom: 1.8, fitted: false, onSelect: commit => selections.push(commit.id), draw() {}, resize() {},
+    setZoom(value) { this.fitted = false; this.zoom = Math.max(.6, Math.min(2.5, value)); },
+    fit() { this.fitted = true; this.zoom = .4; }
+  };
   const viewer = new context.GitGraphViewer(graph, stage, () => ({ title: '分支与合并', state: sim.state }), () => { prepares++; });
   return { viewer, graph, stage, svg, details, parent, document, sim, before, selections, prepares: () => prepares, Element };
 }
@@ -72,6 +76,19 @@ test('画布与独立按钮均能打开，键盘仅处理画布本身，滚动�
   f.stage.fire('keydown', { key: 'Enter', target: f.svg, preventDefault() { throw new Error('不能截获节点按键'); } });
   assert.equal(f.viewer.dialog.open, false); f.viewer.trigger.fire('click'); assert.equal(f.viewer.dialog.open, true);
   assert.equal(f.viewer.trigger.attrs['aria-haspopup'], 'dialog');
+});
+
+test('主画布已适应时打开大图仍保持可读，关闭后恢复适应模式', () => {
+  const f = fixture();
+  f.graph.fit();
+  f.viewer.open();
+  assert.equal(f.graph.fitted, false);
+  assert.equal(f.graph.zoom, 1);
+  f.viewer.zoom();
+  assert.equal(f.viewer.zoomLabel.textContent, '适应');
+  assert.equal(f.viewer.zoomOut.disabled, true);
+  f.viewer.closeButton.fire('click');
+  assert.equal(f.graph.fitted, true);
 });
 
 test('弹窗内点击不误关，遮罩点击关闭后可恢复，缩放端点正确禁用按钮', () => {

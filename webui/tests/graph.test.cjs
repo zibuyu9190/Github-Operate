@@ -50,19 +50,24 @@ test('基础历史从左向右展开，节点和标签文字保持正向，所�
   assert.ok(view.all().some(element => element.textContent === 'HEAD'));
 });
 
-test('横向画布在主面板、放大弹窗和窄屏中等比缩放，放大后两轴均可滚动', () => {
+test('主面板、放大弹窗和窄屏按图形尺寸等比缩放，适应模式容纳完整画布', () => {
   const view = renderer(false), sim = new Simulator('branches'); view.graph.draw(sim.state);
+  const layout = view.graph.layout(sim.state);
+  const size = () => [parseFloat(view.svg.style.width), parseFloat(view.svg.style.height)];
   for (const [width, height] of [[900, 395], [1198, 561], [340, 240]]) {
     view.svg.parentElement = { clientWidth: width, clientHeight: height };
     view.graph.setZoom(1);
-    assert.equal(parseFloat(view.svg.style.width), width);
-    assert.equal(parseFloat(view.svg.style.height), height);
+    const base = size();
+    assert.ok(Math.abs(base[0] / layout.width - base[1] / layout.height) < 1e-9);
+    assert.ok(base[0] / layout.width >= .85 - 1e-9);
     view.graph.setZoom(2);
-    assert.equal(parseFloat(view.svg.style.width), width * 2);
-    assert.equal(parseFloat(view.svg.style.height), height * 2);
+    assert.deepEqual(size(), base.map(value => value * 2));
     view.graph.setZoom(.6);
-    assert.equal(parseFloat(view.svg.style.width), width * .6);
-    assert.equal(parseFloat(view.svg.style.height), height * .6);
+    assert.ok(size().every((value, axis) => Math.abs(value - base[axis] * .6) < 1e-9));
+    view.graph.fit();
+    const fitted = size();
+    assert.ok(Math.abs(Math.max(fitted[0] / width, fitted[1] / height) - 1) < 1e-9);
+    assert.ok(Math.abs(fitted[0] / layout.width - fitted[1] / layout.height) < 1e-9);
   }
 });
 
