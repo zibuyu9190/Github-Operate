@@ -1,6 +1,6 @@
 # Git 图解实验室双人协作命令
 
-每条完整命令后的括号给出了可直接替换的简写。省略 `git` 的写法用于实验室命令框，在系统终端运行时保留 `git`。本练习只有 `origin` 一个远程，所以 `git fetch origin` 也可以写成 `git fetch`。
+本练习的默认远程是 `origin`，因此 `git fetch origin` 可以简写为 `git fetch`。
 
 ## 方案一 · 两人各自合入自己的功能分支
 
@@ -10,38 +10,38 @@
 
 | 顺序 | 执行者 | 命令 |
 | ---: | --- | --- |
-| 1 | 我的本地 | `git switch -c dev`（简写 `switch -c dev`） |
-| 2 | 我的本地 | `git push -u origin dev`（简写 `push -u origin dev`） |
-| 3 | 我的本地 | `git switch -c feature-order`（简写 `switch -c feature-order`） |
-| 4 | 我的本地 | `git add aaa.txt`（简写 `add aaa.txt`） |
-| 5 | 我的本地 | `git commit -m "order 订单新增"`（简写 `commit -m "order 订单新增"`） |
-| 6 | 我的本地 | `git add bbb.txt`（简写 `add bbb.txt`） |
-| 7 | 我的本地 | `git commit -m "order 订单删除"`（简写 `commit -m "order 订单删除"`） |
-| 8 | 我的本地 | `git add bbb.txt ccc.txt`（简写 `add bbb.txt ccc.txt`） |
-| 9 | 我的本地 | `git commit -m "order 订单合并"`（简写 `commit -m "order 订单合并"`） |
-| 10 | 我的本地 | `git push -u origin feature-order`（简写 `push -u origin feature-order`） |
-| 11 | 协作者本地 | `git fetch origin`（简写 `git fetch` 或 `fetch`） |
-| 12 | 协作者本地 | `git switch dev`（简写 `switch dev`） |
-| 13 | 协作者本地 | `git switch -c feature-cart`（简写 `switch -c feature-cart`） |
-| 14 | 协作者本地 | `git add cart.txt`（简写 `add cart.txt`） |
-| 15 | 协作者本地 | `git commit -m "cart 购物车生成"`（简写 `commit -m "cart 购物车生成"`） |
-| 16 | 协作者本地 | `git add node.txt`（简写 `add node.txt`） |
-| 17 | 协作者本地 | `git commit -m "cart 购物车删除"`（简写 `commit -m "cart 购物车删除"`） |
-| 18 | 协作者本地 | `git add test.md`（简写 `add test.md`） |
-| 19 | 协作者本地 | `git commit -m "cart 购物车合并"`（简写 `commit -m "cart 购物车合并"`） |
-| 20 | 协作者本地 | `git push -u origin feature-cart`（简写 `push -u origin feature-cart`） |
-| 21 | 我的本地 | `git fetch origin`（简写 `git fetch` 或 `fetch`） |
-| 22 | 我的本地 | `git switch dev`（简写 `switch dev`） |
-| 23 | 我的本地 | `git merge origin/dev`（简写 `merge origin/dev`） |
-| 24 | 我的本地 | `git merge feature-order`（简写 `merge feature-order`） |
-| 25 | 我的本地 | `git push`（简写 `push`） |
-| 26 | 协作者本地 | `git fetch origin`（简写 `git fetch` 或 `fetch`） |
-| 27 | 协作者本地 | `git switch dev`（简写 `switch dev`） |
-| 28 | 协作者本地 | `git merge origin/dev`（简写 `merge origin/dev`） |
-| 29 | 协作者本地 | `git merge origin/feature-cart`（简写 `merge origin/feature-cart`） |
-| 30 | 协作者本地 | `git push`（简写 `push`） |
-| 31 | 我的本地 | `git fetch origin`（简写 `git fetch` 或 `fetch`） |
-| 32 | 我的本地 | `git merge origin/dev`（简写 `merge origin/dev`） |
+| 1 | 我的本地 | `git switch -c dev` |
+| 2 | 我的本地 | `git push -u origin dev` |
+| 3 | 我的本地 | `git switch -c feature-order` |
+| 4 | 我的本地 | `git add aaa.txt` |
+| 5 | 我的本地 | `git commit -m "order 订单新增"` |
+| 6 | 我的本地 | `git add bbb.txt` |
+| 7 | 我的本地 | `git commit -m "order 订单删除"` |
+| 8 | 我的本地 | `git add bbb.txt ccc.txt` |
+| 9 | 我的本地 | `git commit -m "order 订单合并"` |
+| 10 | 我的本地 | `git push -u origin feature-order` |
+| 11 | 协作者本地 | `git fetch origin`（简写 `git fetch`） |
+| 12 | 协作者本地 | `git switch dev` |
+| 13 | 协作者本地 | `git switch -c feature-cart` |
+| 14 | 协作者本地 | `git add cart.txt` |
+| 15 | 协作者本地 | `git commit -m "cart 购物车生成"` |
+| 16 | 协作者本地 | `git add node.txt` |
+| 17 | 协作者本地 | `git commit -m "cart 购物车删除"` |
+| 18 | 协作者本地 | `git add test.md` |
+| 19 | 协作者本地 | `git commit -m "cart 购物车合并"` |
+| 20 | 协作者本地 | `git push -u origin feature-cart` |
+| 21 | 我的本地 | `git fetch origin`（简写 `git fetch`） |
+| 22 | 我的本地 | `git switch dev` |
+| 23 | 我的本地 | `git merge origin/dev` |
+| 24 | 我的本地 | `git merge feature-order` |
+| 25 | 我的本地 | `git push` |
+| 26 | 协作者本地 | `git fetch origin`（简写 `git fetch`） |
+| 27 | 协作者本地 | `git switch dev` |
+| 28 | 协作者本地 | `git merge origin/dev` |
+| 29 | 协作者本地 | `git merge origin/feature-cart` |
+| 30 | 协作者本地 | `git push` |
+| 31 | 我的本地 | `git fetch origin`（简写 `git fetch`） |
+| 32 | 我的本地 | `git merge origin/dev` |
 
 复练时，先用对应身份准备各次提交涉及的文件改动，再执行 `git add`。本轮练习结束后，双方的本地 `dev` 和共享远程 `dev` 都指向包含订单和购物车改动的 `C9`。
 
@@ -51,28 +51,28 @@
 
 | 顺序 | 执行者 | 命令 |
 | ---: | --- | --- |
-| 1 | 我的本地 | `git switch -c dev`（简写 `switch -c dev`） |
-| 2 | 我的本地 | `git push -u origin dev`（简写 `push -u origin dev`） |
-| 3 | 我的本地 | `git switch -c feature-order`（简写 `switch -c feature-order`） |
-| 4 | 我的本地 | `git add aaa.txt`（简写 `add aaa.txt`） |
-| 5 | 我的本地 | `git commit -m "order 订单生成"`（简写 `commit -m "order 订单生成"`） |
-| 6 | 我的本地 | `git add bbb.txt`（简写 `add bbb.txt`） |
-| 7 | 我的本地 | `git commit -m "order 订单提交"`（简写 `commit -m "order 订单提交"`） |
-| 8 | 我的本地 | `git push -u origin feature-order`（简写 `push -u origin feature-order`） |
-| 9 | 协作者本地 | `git fetch origin`（简写 `git fetch` 或 `fetch`） |
-| 10 | 协作者本地 | `git switch dev`（简写 `switch dev`） |
-| 11 | 协作者本地 | `git switch -c feature-cart`（简写 `switch -c feature-cart`） |
-| 12 | 协作者本地 | `git add cart.md`（简写 `add cart.md`） |
-| 13 | 协作者本地 | `git commit -m "cart 购物车生成"`（简写 `commit -m "cart 购物车生成"`） |
-| 14 | 协作者本地 | `git add one.txt`（简写 `add one.txt`） |
-| 15 | 协作者本地 | `git commit -m "cart 购物车合并"`（简写 `commit -m "cart 购物车合并"`） |
-| 16 | 协作者本地 | `git push -u origin feature-cart`（简写 `push -u origin feature-cart`） |
-| 17 | 我的本地 | `git fetch origin`（简写 `git fetch` 或 `fetch`） |
-| 18 | 我的本地 | `git switch dev`（简写 `switch dev`） |
-| 19 | 我的本地 | `git merge origin/dev`（简写 `merge origin/dev`） |
-| 20 | 我的本地 | `git merge origin/feature-order`（简写 `merge origin/feature-order`） |
-| 21 | 我的本地 | `git merge origin/feature-cart`（简写 `merge origin/feature-cart`） |
-| 22 | 我的本地 | `git push`（简写 `push`） |
+| 1 | 我的本地 | `git switch -c dev` |
+| 2 | 我的本地 | `git push -u origin dev` |
+| 3 | 我的本地 | `git switch -c feature-order` |
+| 4 | 我的本地 | `git add aaa.txt` |
+| 5 | 我的本地 | `git commit -m "order 订单生成"` |
+| 6 | 我的本地 | `git add bbb.txt` |
+| 7 | 我的本地 | `git commit -m "order 订单提交"` |
+| 8 | 我的本地 | `git push -u origin feature-order` |
+| 9 | 协作者本地 | `git fetch origin`（简写 `git fetch`） |
+| 10 | 协作者本地 | `git switch dev` |
+| 11 | 协作者本地 | `git switch -c feature-cart` |
+| 12 | 协作者本地 | `git add cart.md` |
+| 13 | 协作者本地 | `git commit -m "cart 购物车生成"` |
+| 14 | 协作者本地 | `git add one.txt` |
+| 15 | 协作者本地 | `git commit -m "cart 购物车合并"` |
+| 16 | 协作者本地 | `git push -u origin feature-cart` |
+| 17 | 我的本地 | `git fetch origin`（简写 `git fetch`） |
+| 18 | 我的本地 | `git switch dev` |
+| 19 | 我的本地 | `git merge origin/dev` |
+| 20 | 我的本地 | `git merge origin/feature-order` |
+| 21 | 我的本地 | `git merge origin/feature-cart` |
+| 22 | 我的本地 | `git push` |
 
 第 17 步获取最新的 `origin/dev` 和两条远程功能分支。第 19 步把共享远程已有的进度合入本地 `dev`。如果两者已经指向同一个提交，会提示 `Already up to date.`。随后按顺序合入订单和购物车。由于第 2 步已设置 `dev` 的上游，第 22 步直接使用 `git push` 即可。
 
@@ -82,6 +82,6 @@
 
 | 顺序 | 执行者 | 命令 |
 | ---: | --- | --- |
-| 23 | 协作者本地 | `git fetch origin`（简写 `git fetch` 或 `fetch`） |
-| 24 | 协作者本地 | `git switch dev`（简写 `switch dev`） |
-| 25 | 协作者本地 | `git merge origin/dev`（简写 `merge origin/dev`） |
+| 23 | 协作者本地 | `git fetch origin`（简写 `git fetch`） |
+| 24 | 协作者本地 | `git switch dev` |
+| 25 | 协作者本地 | `git merge origin/dev` |
