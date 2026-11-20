@@ -36,7 +36,7 @@
 | 26 | 协作者本地 | `git fetch origin` |
 | 27 | 协作者本地 | `git switch dev` |
 | 28 | 协作者本地 | `git merge origin/dev` |
-| 29 | 协作者本地 | `git merge origin/feature-cart` |
+| 29 | 协作者本地 | `git merge feature-cart` |
 | 30 | 协作者本地 | `git push` |
 | 31 | 我的本地 | `git fetch origin` |
 | 32 | 我的本地 | `git merge origin/dev` |
@@ -84,6 +84,8 @@
 | 24 | 协作者本地 | `git switch dev` |
 | 25 | 协作者本地 | `git merge origin/dev` |
 
+协作者完成第 23–25 步后，双方的本地 `dev` 和共享远程 `dev` 都指向 `C7`。
+
 ## 方案三 · 协作者合入两个功能分支
 
 从“基础提交”的初始状态开始。两人分别从 `dev` 创建并推送各自的功能分支，由“协作者本地”先合入购物车、再合入订单，最后统一推送 `dev`。每次 `git add` 前，先用对应身份准备相应的文件改动。
@@ -108,8 +110,8 @@
 | 16 | 协作者本地 | `git add nodes.java` |
 | 17 | 协作者本地 | `git commit -m "cart 购物车删除"` |
 | 18 | 协作者本地 | `git push -u origin feature-cart` |
-| 19 | 协作者本地 | `git switch dev` |
-| 20 | 协作者本地 | `git fetch origin` |
+| 19 | 协作者本地 | `git fetch origin` |
+| 20 | 协作者本地 | `git switch dev` |
 | 21 | 协作者本地 | `git merge origin/dev` |
 | 22 | 协作者本地 | `git merge origin/feature-cart` |
 | 23 | 协作者本地 | `git merge origin/feature-order` |
@@ -118,6 +120,6 @@
 | 26 | 我的本地 | `git switch dev` |
 | 27 | 我的本地 | `git merge origin/dev` |
 
-第 9 步获取 `origin/dev`，供协作者建立本地 `dev`。第 20 步在合入两个功能前重新获取远程状态，第 21 步再将共享远程已有的进度合入协作者的 `dev`。
+第 9 步获取 `origin/dev`，供协作者建立本地 `dev`。第 19–21 步先获取最新远程状态，再切到 `dev` 并合入 `origin/dev`，然后才合入两个功能分支。
 
 第 24 步结束后，共享远程 `dev` 已包含两个功能。第 25–27 步把「我的本地」也同步到合并结果。第 26 步先切到 `dev`，使最后一次合并更新本地 `dev`。按本轮提交顺序，完成后双方的本地 `dev` 和共享远程 `dev` 都指向 `C8`。
