@@ -1,7 +1,5 @@
 # Git 图解实验室双人协作命令
 
-本练习的默认远程是 `origin`，因此 `git fetch origin` 可以简写为 `git fetch`。
-
 ## 方案一 · 两人各自合入自己的功能分支
 
 这份清单按“基础提交”场景中的实际执行顺序整理。原日志有 33 条记录，其中 32 条成功、1 条失败。修正后共 32 条命令，由“我的本地”执行 17 条，“协作者本地”执行 15 条。
@@ -20,7 +18,7 @@
 | 8 | 我的本地 | `git add bbb.txt ccc.txt` |
 | 9 | 我的本地 | `git commit -m "order 订单合并"` |
 | 10 | 我的本地 | `git push -u origin feature-order` |
-| 11 | 协作者本地 | `git fetch origin`（简写 `git fetch`） |
+| 11 | 协作者本地 | `git fetch origin` |
 | 12 | 协作者本地 | `git switch dev` |
 | 13 | 协作者本地 | `git switch -c feature-cart` |
 | 14 | 协作者本地 | `git add cart.txt` |
@@ -30,17 +28,17 @@
 | 18 | 协作者本地 | `git add test.md` |
 | 19 | 协作者本地 | `git commit -m "cart 购物车合并"` |
 | 20 | 协作者本地 | `git push -u origin feature-cart` |
-| 21 | 我的本地 | `git fetch origin`（简写 `git fetch`） |
+| 21 | 我的本地 | `git fetch origin` |
 | 22 | 我的本地 | `git switch dev` |
 | 23 | 我的本地 | `git merge origin/dev` |
 | 24 | 我的本地 | `git merge feature-order` |
 | 25 | 我的本地 | `git push` |
-| 26 | 协作者本地 | `git fetch origin`（简写 `git fetch`） |
+| 26 | 协作者本地 | `git fetch origin` |
 | 27 | 协作者本地 | `git switch dev` |
 | 28 | 协作者本地 | `git merge origin/dev` |
 | 29 | 协作者本地 | `git merge origin/feature-cart` |
 | 30 | 协作者本地 | `git push` |
-| 31 | 我的本地 | `git fetch origin`（简写 `git fetch`） |
+| 31 | 我的本地 | `git fetch origin` |
 | 32 | 我的本地 | `git merge origin/dev` |
 
 复练时，先用对应身份准备各次提交涉及的文件改动，再执行 `git add`。本轮练习结束后，双方的本地 `dev` 和共享远程 `dev` 都指向包含订单和购物车改动的 `C9`。
@@ -59,7 +57,7 @@
 | 6 | 我的本地 | `git add bbb.txt` |
 | 7 | 我的本地 | `git commit -m "order 订单提交"` |
 | 8 | 我的本地 | `git push -u origin feature-order` |
-| 9 | 协作者本地 | `git fetch origin`（简写 `git fetch`） |
+| 9 | 协作者本地 | `git fetch origin` |
 | 10 | 协作者本地 | `git switch dev` |
 | 11 | 协作者本地 | `git switch -c feature-cart` |
 | 12 | 协作者本地 | `git add cart.md` |
@@ -67,7 +65,7 @@
 | 14 | 协作者本地 | `git add one.txt` |
 | 15 | 协作者本地 | `git commit -m "cart 购物车合并"` |
 | 16 | 协作者本地 | `git push -u origin feature-cart` |
-| 17 | 我的本地 | `git fetch origin`（简写 `git fetch`） |
+| 17 | 我的本地 | `git fetch origin` |
 | 18 | 我的本地 | `git switch dev` |
 | 19 | 我的本地 | `git merge origin/dev` |
 | 20 | 我的本地 | `git merge origin/feature-order` |
@@ -82,6 +80,6 @@
 
 | 顺序 | 执行者 | 命令 |
 | ---: | --- | --- |
-| 23 | 协作者本地 | `git fetch origin`（简写 `git fetch`） |
+| 23 | 协作者本地 | `git fetch origin` |
 | 24 | 协作者本地 | `git switch dev` |
 | 25 | 协作者本地 | `git merge origin/dev` |
