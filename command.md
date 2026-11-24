@@ -123,3 +123,47 @@
 第 9 步获取 `origin/dev`，供协作者建立本地 `dev`。第 19–21 步先获取最新远程状态，再切到 `dev` 并合入 `origin/dev`，然后才合入两个功能分支。
 
 第 24 步结束后，共享远程 `dev` 已包含两个功能。第 25–27 步把「我的本地」也同步到合并结果。第 26 步先切到 `dev`，使最后一次合并更新本地 `dev`。按本轮提交顺序，完成后双方的本地 `dev` 和共享远程 `dev` 都指向 `C8`。
+
+## 方案四 · 合并负责人统一合入两个功能分支
+
+从“基础提交”的初始状态开始。“我的本地”开发订单，“协作者本地”开发购物车，两人从同一个 `dev` 基线创建并推送各自的功能分支，随后由“合并负责人”统一合入 `dev`。每次执行 `git add` 前，先用对应身份创建或编辑表中指定的文件。
+
+| 顺序 | 执行者 | 命令 |
+| ---: | --- | --- |
+| 1 | 我的本地 | `git switch -c dev` |
+| 2 | 我的本地 | `git push -u origin dev` |
+| 3 | 我的本地 | `git switch -c feature-order` |
+| 4 | 我的本地 | `git add aaa.txt` |
+| 5 | 我的本地 | `git commit -m "order 订单生成"` |
+| 6 | 我的本地 | `git push -u origin feature-order` |
+| 7 | 协作者本地 | `git fetch origin` |
+| 8 | 协作者本地 | `git switch dev` |
+| 9 | 协作者本地 | `git switch -c feature-cart` |
+| 10 | 协作者本地 | `git add "cart.md"` |
+| 11 | 协作者本地 | `git commit -m "cart 购物车生成"` |
+| 12 | 协作者本地 | `git add "one.txt"` |
+| 13 | 协作者本地 | `git commit -m "cart 购物车删除"` |
+| 14 | 协作者本地 | `git push -u origin "feature-cart"` |
+| 15 | 合并负责人 | `git fetch origin` |
+| 16 | 合并负责人 | `git switch dev` |
+| 17 | 合并负责人 | `git merge origin/dev` |
+| 18 | 合并负责人 | `git merge --no-ff origin/feature-order` |
+| 19 | 合并负责人 | `git merge origin/feature-cart` |
+| 20 | 合并负责人 | `git push` |
+
+等两条功能分支都发布后，再切换到“合并负责人”。第 15 步获取 `origin/dev` 和两条功能分支的跟踪引用，第 16–17 步切到本地 `dev` 并同步已有进度。本轮两者都在 `C2`，第 17 步会提示 `Already up to date.`。
+
+第 18 步用 `--no-ff` 合入订单分支，即使可以从 `C2` 快进到 `C3`，也会创建独立的合并提交 `C6`。此时 `dev` 和购物车分支已经分叉，第 19 步普通合并就会创建 `C7`。第 20 步将包含两个功能的 `dev` 推送到共享远程。
+
+### 两个开发身份同步合并结果（按需）
+
+| 顺序 | 执行者 | 命令 |
+| ---: | --- | --- |
+| 21 | 我的本地 | `git fetch origin` |
+| 22 | 我的本地 | `git switch dev` |
+| 23 | 我的本地 | `git merge origin/dev` |
+| 24 | 协作者本地 | `git fetch origin` |
+| 25 | 协作者本地 | `git switch dev` |
+| 26 | 协作者本地 | `git merge origin/dev` |
+
+第 20 步完成后，合并负责人的本地 `dev` 和共享远程 `dev` 都指向 `C7`。第 23、26 步分别把两位开发者的本地 `dev` 从 `C2` 快进到 `C7`。
