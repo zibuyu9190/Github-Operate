@@ -1,6 +1,6 @@
 /* 独立样式适配原布局与当前工作台，参考答案收起时只占一行。 */
-.lesson-guide { flex: none; margin: 0 16px 12px; border: 1px solid #cbdedc; border-radius: 10px; background: #f7fbfa; color: #27394c; font-size: 13px; }
-.lesson-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 12px 14px; cursor: pointer; list-style: none; }
+.lesson-guide { flex: none; margin: 6px 12px; border: 1px solid #cbdedc; border-radius: 8px; background: #f7fbfa; color: #27394c; font-size: 12px; }
+.lesson-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 6px 11px; cursor: pointer; list-style: none; }
 .lesson-summary::-webkit-details-marker { display: none; }
 .lesson-summary strong::before { content: '▸'; display: inline-block; margin-right: 8px; }
 .lesson-guide[open] .lesson-summary strong::before { content: '▾'; }
@@ -10,11 +10,11 @@
 .lesson-toggle { margin-left: auto; font-size: 12px; color: #60746f; }
 .lesson-guide[open] .lesson-toggle { display: none; }
 .lesson-body { border-top: 1px solid #dce8e5; padding: 14px; max-height: 360px; overflow: auto; }
-/* 当前工作台采用固定高度；展开答案时允许页面滚动，确保答案和图都能完整访问。 */
-body:has(.lesson-guide[open]) { height: auto; min-height: 100vh; overflow: auto; }
-.workbench:has(.lesson-guide[open]) { flex: none; min-height: calc(100vh - 60px); }
-.visual-panel:has(.lesson-guide[open]) { flex: none; }
-.visual-panel:has(.lesson-guide[open]) .graph-stage { flex: none; height: 260px; }
+/* 展开参考答案或提交详情时让页面滚动，为提交图和文件区保留空间。 */
+body:has(.visual-panel > details[open]) { height: auto; min-height: 100vh; overflow: auto; }
+.workbench:has(.visual-panel > details[open]) { flex: none; min-height: calc(100vh - 60px); }
+.visual-panel:has(> details[open]) { flex: none; }
+.visual-panel:has(> details[open]) .graph-stage { flex: none; height: min(260px, 65dvh); }
 .lesson-body h3 { margin: 16px 0 8px; font-size: 13px; }
 .lesson-goal { margin: 0 0 12px; line-height: 1.7; font-weight: 600; }
 .lesson-route-bar { display: flex; align-items: center; gap: 12px; }
@@ -23,6 +23,8 @@ body:has(.lesson-guide[open]) { height: auto; min-height: 100vh; overflow: auto;
 .lesson-notice { margin: 9px 0; color: #61736e; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .lesson-steps { padding-left: 25px; margin: 8px 0; }
 .lesson-steps li { padding: 4px 0 6px; line-height: 1.7; }
+.lesson-actor { display: inline-block; margin-right: 6px; padding: 1px 6px; border: 1px solid #a7f3d0; border-radius: 4px; background: #ecfdf5; color: #065f46; font-size: 11px; font-weight: 600; vertical-align: baseline; }
+.lesson-actor.is-remote { border-color: #c4b5fd; background: #f5f3ff; color: #5b21b6; }
 .lesson-command { display: inline-block; max-width: 100%; background: #fff; color: #195f52; border: 1px solid #c6dad4; border-radius: 5px; padding: 5px 9px; font: 12px/1.6 Consolas, 'Microsoft YaHei', monospace; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; cursor: pointer; }
 .lesson-command:hover { background: #e9f5ee; border-color: #7ead9c; }
 .lesson-sample { margin: 7px 0; padding: 9px 12px; border-left: 3px solid #9abdad; background: #eef5f1; font: 12px/1.7 Consolas, 'Microsoft YaHei', monospace; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }

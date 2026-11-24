@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { Simulator, RemoteWorkspace } = require('../simulator.js');
-const { SyncView } = require('../graph-viewer.js').RepositoryBrowser;
+const { SyncView } = require('../repo-status.js');
 
 function fixture() {
   class Element {
@@ -44,10 +44,21 @@ test('身份切换只读取各自 origin 引用，协作者 push 后另一方保
   assert.equal(sim.headId(), 'C2');
 });
 
-test('新远程分支显示尚未获取，另一方 fetch 前不会伪造跟踪引用或本地分支', () => {
+test('合并负责人单独 fetch，协作者的跟踪引用和本地分支保持各自状态', () => {
   const sim = new Simulator(), f = fixture();
-  const peer = new RemoteWorkspace('main', sim.state.remote.commits[sim.state.remote.branches.main], sim.state.remote);
+  const origin = sim.state.remote, start = origin.commits[origin.branches.main];
+  const peer = new RemoteWorkspace('main', start, origin);
+  const integrator = new RemoteWorkspace('main', start, origin, 'integrator');
   run(sim, 'git switch -c dev'); run(sim, 'git push -u origin dev');
+  f.view.update(integrator.commandContext(sim).state, 'integrator');
+  assert.equal(f.view.trackingHeading.textContent, '合并负责人 origin/*');
+  assert.throws(() => f.view.update(sim.state, '__proto__'), /未知的仓库身份/);
+  assert.deepEqual(f.rows(), [['dev', 'C2', '尚未获取未同步'], ['main', 'C2', 'C2']]);
+  assert.equal(integrator.tracking.dev, undefined);
+  assert.equal(integrator.execute(sim, 'git fetch').ok, true);
+  f.view.update(integrator.commandContext(sim).state, 'integrator');
+  assert.deepEqual(f.rows(), [['dev', 'C2', 'C2'], ['main', 'C2', 'C2']]);
+  assert.equal(integrator.branches.dev, undefined);
   f.view.update(peer.commandContext(sim).state, 'remote');
   assert.deepEqual(f.rows(), [['dev', 'C2', '尚未获取未同步'], ['main', 'C2', 'C2']]);
   assert.equal(peer.tracking.dev, undefined); assert.equal(peer.branches.dev, undefined);

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { Simulator, RemoteWorkspace } = require('../simulator.js');
-const { latestPathCommit } = require('../graph-viewer.js').RepositoryBrowser;
+const { latestPathCommit } = require('../repo-browser.js');
 
 // 所有真实 Git 操作仅限仓库 target/ 下的独立临时目录，不访问真实远程或开发仓库。
 const outputRoot = path.resolve(__dirname, '../../target/webui-validation');
@@ -282,7 +282,7 @@ test('真实 Git 对照：协作者自由编辑多个文件，本地 fetch 后 p
   f.git(['init', '--bare', '-b', 'main', remotePath]); f.git(['remote', 'add', 'origin', remotePath]); f.command('push', '-u', 'origin', 'main'); f.git(['clone', remotePath, collaborator]);
   const draft = new RemoteWorkspace('main', f.sim.state.remote.commits[f.sim.state.remote.branches.main]);
   draft.editFile('hello.txt', draft.work['hello.txt'].replace('你好，Git！', '协作者的新问候'));
-  draft.deleteFile('README.md'); draft.editFile('collaborator.txt', '协作者自定义的文件\n'); draft.stage('.');
+  draft.deleteFile('README.md'); draft.editFile('collaborator.txt', '协作者自定义的文件\n'); assert.equal(draft.execute(f.sim, 'git add .').ok, true);
   for (const [file, text] of Object.entries(draft.work)) fs.writeFileSync(path.join(collaborator, file), text, 'utf8');
   fs.unlinkSync(path.join(collaborator, 'README.md'));
   f.git(['add', '.'], false, collaborator); f.git(['commit', '-m', '调整问候并更新协作文件'], false, collaborator);

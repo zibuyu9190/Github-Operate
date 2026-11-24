@@ -13,8 +13,7 @@ dialog.graph-viewer[open] { display: flex; flex-direction: column; }
 .graph-viewer-tools { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .graph-viewer-scale { min-width: 42px; text-align: center; font: 12px Consolas, monospace; }
 .graph-viewer-canvas { flex: 1; display: flex; min-height: 0; overflow: hidden; }
-.graph-viewer .graph-stage { flex: 1; width: 100%; height: 100%; min-height: 0; margin: 0; overflow: auto; cursor: default; }
-.graph-viewer .graph-stage svg { display: block; min-height: 0; }
+.graph-viewer .graph-stage { flex: 1; width: 100%; height: 100%; margin: 0; cursor: default; }
 .graph-viewer .canvas-caption { display: none; }
 .graph-viewer-details { flex: none; border-top: 1px solid #dbe5ec; padding: 10px 18px; max-height: 30vh; overflow: auto; font-size: 12px; }
 .graph-viewer-details summary { cursor: pointer; color: #34546a; line-height: 1.7; overflow-wrap: anywhere; }
@@ -62,83 +61,109 @@ dialog.graph-viewer[open] { display: flex; flex-direction: column; }
 
 /* 独立命名空间让仓库浏览器兼容现有主页面和命令手册样式。 */
 body.repository-browser-open { overflow: hidden !important; }
-.repository-browser { width: min(1180px, calc(100vw - 32px)); max-width: none; height: min(820px, calc(100dvh - 48px)); max-height: calc(100dvh - 48px); margin: auto; padding: 0; border: 1px solid #d1d9e0; border-radius: 12px; background: #fff; color: #1f2328; overflow: hidden; box-shadow: 0 24px 80px #0f172a40; font-size: 13px; }
+.repository-browser { width: min(1200px, calc(100vw - 32px)); max-width: none; height: min(820px, calc(100dvh - 40px)); max-height: calc(100dvh - 40px); margin: auto; padding: 0; border: 1px solid #cbd5e1; border-radius: 14px; background: #f1f5f9; color: #0f172a; overflow: hidden; box-shadow: 0 24px 64px -12px #0f172a59; font-size: 13px; }
 .repository-browser[open] { display: flex; flex-direction: column; }
 .repository-browser::backdrop { background: #0f172a80; backdrop-filter: blur(3px); }
 .repository-browser * { box-sizing: border-box; }
-.repository-browser :focus-visible { outline: 2px solid #0969da; outline-offset: 2px; }
-.repo-header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 24px; background: #f6f8fa; }
-.repo-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-width: 0; }
-.repo-identity h2 { margin: 0; font-size: 20px; color: #0969da; }
-.repo-symbol { color: #59636e; font-size: 22px; }
-.repo-badge { padding: 2px 8px; border: 1px solid #d1d9e0; border-radius: 20px; color: #59636e; font-size: 11px; }
-.repo-button { flex: none; padding: 6px 12px; border: 1px solid #d1d9e0; border-radius: 6px; background: #f6f8fa; color: #1f2328; font: inherit; cursor: pointer; }
-.repo-button:hover { background: #eef1f4; }
-.repo-code-tab { display: flex; align-items: center; gap: 20px; padding: 0 24px; background: #f6f8fa; border-bottom: 1px solid #d1d9e0; color: #59636e; }
-.repo-code-tab strong { padding: 12px 4px; border-bottom: 2px solid #fd8c73; color: #1f2328; }
-.repo-code-tab > span { font-size: 12px; }
-.repo-controls { flex: none; display: flex; align-items: flex-end; flex-wrap: wrap; gap: 16px; padding: 18px 24px 8px; }
-.repo-control { display: grid; gap: 6px; min-width: 0; max-width: 100%; }
-.repo-control label { font-size: 12px; font-weight: 600; color: #59636e; }
-.repo-control select { max-width: 100%; min-width: 155px; padding: 7px 32px 7px 10px; border: 1px solid #d1d9e0; border-radius: 6px; background: #f6f8fa; color: #1f2328; font: inherit; }
-.repo-file-count { margin-left: auto; padding-bottom: 8px; color: #59636e; font-size: 12px; }
-.repository-browser .repo-hint { flex: none; margin: 0; padding: 4px 24px 14px; color: #59636e; font-size: 12px; line-height: 1.7; }
-.repo-notice { margin: 0 24px 12px; padding: 9px 12px; border: 1px solid #d4a72c60; border-radius: 6px; background: #fff8c5; font-size: 12px; }
-.repo-notice[hidden] { display: none; }
-.repo-body { flex: 1; min-height: 0; padding: 0 24px 24px; overflow: auto; overscroll-behavior: contain; }
-.repo-latest { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid #d1d9e0; border-radius: 6px; background: #f6f8fa; }
-.repo-latest:empty { display: none; }
-.repo-latest strong { min-width: 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 500; }
-.repo-commit-icon { color: #1a7f37; }
-.repo-latest code { flex: none; margin-left: auto; color: #59636e; font: 12px var(--mono, monospace); }
-.repo-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: 14px 0; min-width: 0; font-size: 14px; }
-.repo-path-button { max-width: 100%; padding: 3px 0; border: 0; border-radius: 3px; background: transparent; color: #0969da; font: inherit; text-align: left; overflow-wrap: anywhere; }
+.repository-browser :focus-visible { outline: 2px solid #0d9488; outline-offset: 2px; }
+
+/* 顶栏融合品牌、代码页签、文件统计与关闭操作，压缩纵向占用。 */
+.repo-header { flex: none; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 11px 20px; background: #0f172a; color: #f8fafc; border-bottom: 1px solid #1e293b; }
+.repo-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; min-width: 0; }
+.repo-identity h2 { margin: 0; font-size: 15px; font-weight: 700; color: #f8fafc; letter-spacing: -0.01em; }
+.repo-symbol { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; background: #10b98124; border: 1px solid #10b98155; color: #34d399; font-size: 14px; }
+.repo-badge { padding: 2px 8px; border: 1px solid #334155; border-radius: 999px; background: #1e293b; color: #94a3b8; font-size: 11px; font-weight: 600; }
+.repo-code-tab { display: inline-flex; align-items: center; gap: 8px; padding: 4px 11px; border: 1px solid #334155; border-radius: 7px; background: #1e293b; color: #94a3b8; font-size: 12px; }
+.repo-code-tab strong { padding: 0; border: 0; color: #34d399; font-weight: 600; }
+.repo-code-tab > span { font-size: 11.5px; color: #cbd5e1; }
+.repo-header-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.repo-file-count { padding: 4px 10px; border: 1px solid #334155; border-radius: 999px; background: #1e293b; color: #cbd5e1; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.repo-button { flex: none; padding: 5px 12px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #0f172a; font: 600 12px inherit; cursor: pointer; transition: background .12s, border-color .12s; }
+.repo-button:hover { background: #f1f5f9; border-color: #94a3b8; }
+.repo-header .repo-button { border-color: #475569; background: #1e293b; color: #f8fafc; }
+.repo-header .repo-button:hover { background: #334155; border-color: #64748b; }
+
+/* 工具栏内联排列来源/分支选择器、路径面包屑与只读说明。 */
+.repo-toolbar { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 20px; background: #fff; border-bottom: 1px solid #e2e8f0; }
+.repo-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.repo-control { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; border: 1px solid #cbd5e1; border-radius: 7px; background: #f8fafc; overflow: hidden; }
+.repo-control label { padding: 5px 9px; border-right: 1px solid #cbd5e1; background: #f1f5f9; color: #475569; font-size: 11.5px; font-weight: 600; white-space: nowrap; user-select: none; }
+.repo-control select { max-width: 100%; min-width: 116px; padding: 5px 28px 5px 9px; border: 0; background: #fff; color: #0f172a; font: 600 12.5px inherit; cursor: pointer; }
+.repo-breadcrumb { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 0; padding: 4px 11px; min-width: 0; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; font-size: 12.5px; }
+.repo-path-button { max-width: 100%; padding: 1px 3px; border: 0; border-radius: 4px; background: transparent; color: #0284c7; font: 600 12.5px inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .repo-path-button:hover { text-decoration: underline; }
-.repo-path-separator { color: #8c959f; }
-.repo-current-path { font-weight: 600; overflow-wrap: anywhere; }
-.repo-file-list, .repo-file-card, .repo-readme { border: 1px solid #d1d9e0; border-radius: 6px; overflow: hidden; }
-.repo-list-heading, .repo-file-row { display: grid; grid-template-columns: minmax(130px, .85fr) minmax(0, 1.4fr) 95px 65px; gap: 20px; align-items: center; }
-.repo-list-heading { padding: 10px 16px; background: #f6f8fa; color: #59636e; font-size: 12px; }
-.repo-file-row { width: 100%; padding: 12px 16px; border: 0; border-top: 1px solid #d8dee4; background: #fff; color: #1f2328; font: inherit; text-align: left; }
-.repo-file-row:hover, .repo-parent:hover { background: #f6f8fa; }
-.repo-entry-name { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 0; border: 0; background: transparent; color: #1f2328; font: inherit; text-align: left; cursor: pointer; }
-.repo-entry-name:hover { color: #0969da; text-decoration: underline; }
+.repo-path-separator { color: #94a3b8; }
+.repo-current-path { font-weight: 700; color: #0f172a; overflow-wrap: anywhere; }
+.repository-browser .repo-hint { flex: 1 1 260px; margin: 0; padding: 5px 10px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; color: #475569; font-size: 11.5px; line-height: 1.5; }
+.repo-notice { flex: none; margin: 10px 20px 0; padding: 8px 12px; border: 1px solid #f59e0b66; border-radius: 7px; background: #fffbeb; color: #92400e; font-size: 12px; }
+.repo-notice[hidden] { display: none !important; }
+
+/* 主视图默认通栏；存在 README 预览或提交详情时自动切换为左右双栏工作台。 */
+.repo-body { flex: 1; min-height: 0; padding: 14px 20px 18px; overflow: auto; overscroll-behavior: contain; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.repo-body.has-side { grid-template-columns: minmax(0, 1.35fr) minmax(340px, .95fr); overflow: hidden; align-items: stretch; }
+.repo-main, .repo-side { min-width: 0; }
+.repo-body.has-side .repo-main, .repo-body.has-side .repo-side { min-height: 0; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; }
+.repo-side { display: flex; flex-direction: column; gap: 14px; }
+/* 卡片保留内容高度，由侧栏统一滚动；禁止 flex 压缩后被卡片的圆角裁切隐藏正文。 */
+.repo-side > section { flex: none; }
+.repo-side[hidden] { display: none !important; }
+
+/* 最新提交作为仓库列表的顶栏横幅，与下方文件列表无缝拼接。 */
+.repo-latest { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 1px solid #cbd5e1; border-bottom: 0; border-radius: 10px 10px 0 0; background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%); }
+.repo-latest[hidden], .repo-latest:empty { display: none !important; }
+.repo-latest strong { min-width: 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 600; }
+.repo-commit-icon { color: #10b981; font-size: 11px; }
+.repo-latest code { flex: none; margin-left: auto; color: #334155; font: 600 11px var(--mono, monospace); }
+.repo-file-list, .repo-file-card { border: 1px solid #cbd5e1; border-radius: 0 0 10px 10px; background: #fff; overflow: hidden; box-shadow: 0 1px 3px #0f172a0a; }
+.repo-list-heading, .repo-file-row { display: grid; grid-template-columns: minmax(120px, .9fr) minmax(0, 1.45fr) 82px 58px; gap: 12px; align-items: center; }
+.repo-list-heading { padding: 7px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 11.5px; font-weight: 600; }
+.repo-file-row { width: 100%; padding: 8.5px 14px; border: 0; border-top: 1px solid #f1f5f9; background: #fff; color: #0f172a; font: inherit; text-align: left; transition: background .12s; }
+.repo-list-heading + .repo-file-row { border-top: 0; }
+.repo-file-row:hover, .repo-parent:hover { background: #f0fdf4; }
+.repo-entry-name { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0; border: 0; background: transparent; color: #0f172a; font: 500 13px inherit; text-align: left; cursor: pointer; }
+.repo-entry-name:hover { color: #0284c7; text-decoration: underline; }
 .repo-entry-name > span:last-child { overflow-wrap: anywhere; }
-.repo-folder-icon { flex: none; color: #54aeff; }
-.repo-file-icon { flex: none; color: #6e7781; }
-.repo-entry-size, .repo-entry-type { color: #59636e; font-size: 12px; }
+.repo-folder-icon { flex: none; color: #3b82f6; font-size: 13px; }
+.repo-file-icon { flex: none; color: #64748b; font-size: 13px; }
+.repo-entry-size, .repo-entry-type { color: #64748b; font-size: 12px; font-variant-numeric: tabular-nums; }
 .repo-entry-size, .repo-list-heading > span:last-child { text-align: right; }
+
 /* 文件入口和提交入口分别使用按钮，避免嵌套交互元素；说明截断后可悬停查看全文。 */
-.repo-commit-link { display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 100%; padding: 2px 0; border: 0; background: transparent; color: #59636e; font: inherit; text-align: left; cursor: pointer; }
+.repo-commit-link { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 2px 0; border: 0; background: transparent; color: #475569; font: inherit; text-align: left; cursor: pointer; }
 .repo-commit-message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.repo-commit-link:hover .repo-commit-message { color: #0969da; text-decoration: underline; }
-.repo-commit-id { flex: none; color: #6e7781; font: 11px var(--mono, monospace); }
-.repo-entry-time { flex: none; color: #59636e; font-size: 12px; white-space: nowrap; }
-.repo-history-missing { color: #8c959f; font-size: 12px; }
+.repo-latest .repo-commit-message { color: #0f172a; font-weight: 600; }
+.repo-commit-link:hover .repo-commit-message { color: #0284c7; text-decoration: underline; }
+.repo-commit-id { flex: none; padding: 1px 6px; border: 1px solid #e2e8f0; border-radius: 4px; background: #f8fafc; color: #475569; font: 600 11px var(--mono, monospace); }
+.repo-entry-time { flex: none; color: #64748b; font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.repo-history-missing { color: #94a3b8; font-size: 12px; }
 .repo-latest > .repo-commit-link { flex: 1; }
-.repo-file-history { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #d1d9e0; background: #fff; }
-.repo-file-history > span { flex: none; color: #6e7781; font-size: 12px; }
+.repo-file-history { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid #e2e8f0; background: #fcfdfe; }
+.repo-file-history > span { flex: none; color: #64748b; font-size: 11.5px; font-weight: 600; }
 .repo-file-history .repo-commit-link { flex: 1; }
-.repo-commit-details { margin: 0 0 18px; border: 1px solid #d1d9e0; border-radius: 6px; overflow: hidden; }
-.repo-commit-details[hidden] { display: none; }
-.repo-commit-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #d1d9e0; background: #f6f8fa; }
-.repo-commit-header h3 { margin: 3px 0 0; font-size: 13px; overflow-wrap: anywhere; }
-.repo-commit-body { padding: 4px 16px 16px; font-size: 12px; line-height: 1.7; }
-.repo-commit-body pre { overflow: auto; max-height: 350px; }
+
+/* 右侧边栏承载提交详情与 README 预览，查看提交改动时不顶走左侧文件列表。 */
+.repo-commit-details { margin: 0; border: 1px solid #99f6e4; border-radius: 10px; background: #fff; overflow: hidden; box-shadow: 0 4px 12px #0d948814; }
+.repo-commit-details[hidden] { display: none !important; }
+.repo-commit-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 14px; border-bottom: 1px solid #ccfbf1; background: #f0fdfa; }
+.repo-commit-header h3 { margin: 0; font-size: 12.5px; font-weight: 700; color: #0f766e; overflow-wrap: anywhere; }
+.repo-commit-body { padding: 8px 14px 14px; font-size: 12px; line-height: 1.65; }
+.repo-commit-body pre { overflow: auto; max-height: 300px; }
 .repo-commit-body .commit-full-snapshot pre { max-height: none; overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; }
-.repo-parent { width: 100%; padding: 10px 16px; border: 0; border-top: 1px solid #d8dee4; background: #fff; text-align: left; color: #0969da; font: inherit; }
-.repo-readme { margin-top: 18px; }
-.repo-readme h3 { margin: 0; padding: 12px 16px; border-bottom: 1px solid #d1d9e0; font-size: 13px; }
-.repo-readme pre { margin: 0; padding: 20px; color: #1f2328; font: 13px/1.8 var(--mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
-.repo-file-header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 16px; background: #f6f8fa; border-bottom: 1px solid #d1d9e0; }
-.repo-file-header strong { overflow-wrap: anywhere; font-size: 13px; }
-.repo-file-header > span { color: #59636e; font-size: 12px; }
+.repo-parent { width: 100%; padding: 8.5px 14px; border: 0; border-bottom: 1px solid #f1f5f9; background: #f8fafc; text-align: left; color: #0284c7; font: 600 12.5px inherit; cursor: pointer; }
+.repo-readme { margin: 0; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; overflow: hidden; box-shadow: 0 1px 3px #0f172a0a; }
+.repo-readme[hidden] { display: none !important; }
+.repo-readme h3 { margin: 0; padding: 9px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-size: 12.5px; font-weight: 700; }
+.repo-readme pre { margin: 0; padding: 14px 16px; color: #1e293b; font: 12.5px/1.75 var(--mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
+.repo-file-header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 9px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+.repo-file-header strong { overflow-wrap: anywhere; font-size: 13px; color: #0f172a; }
+.repo-file-header > span { color: #64748b; font-size: 12px; }
 .repo-file-header > button { margin-left: auto; }
-.repo-code { overflow: auto; max-height: 55dvh; padding: 12px 0; color: #1f2328; background: #fff; font: 12px/1.8 var(--mono, Consolas, monospace); tab-size: 4; }
-.repo-code-line { display: flex; min-width: max-content; min-height: 1.8em; }
-.repo-line-number { position: sticky; left: 0; flex: none; width: 58px; padding: 0 16px 0 8px; background: #fff; color: #6e7781; text-align: right; user-select: none; }
+.repo-code { overflow: auto; max-height: 56dvh; padding: 10px 0; color: #0f172a; background: #fff; font: 12px/1.75 var(--mono, Consolas, monospace); tab-size: 4; }
+.repo-code-line { display: flex; min-width: max-content; min-height: 1.75em; }
+.repo-line-number { position: sticky; left: 0; flex: none; width: 52px; padding: 0 14px 0 8px; background: #fff; color: #94a3b8; text-align: right; user-select: none; }
 .repo-line-text { padding-right: 20px; white-space: pre; }
-.repo-empty { margin: 0; padding: 32px 18px; color: #59636e; text-align: center; line-height: 1.8; }
+.repo-empty { margin: 0; padding: 32px 18px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; color: #64748b; text-align: center; line-height: 1.8; }
+.repo-file-list .repo-empty, .repo-code .repo-empty { border: 0; border-radius: 0; }
 /* 本地仓库状态独立于文件选择与协作者身份，长分支名在窄屏内换行。 */
 .repository-status { flex: none; min-width: 0; margin: 0 16px 12px; padding: 11px 13px; border: 1px solid #d5e5e8; border-radius: 9px; background: #f4faf9; color: #294657; }
 .repository-status-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; font-size: 12px; }
@@ -150,33 +175,36 @@ body.repository-browser-open { overflow: hidden !important; }
 .repository-status .repository-status-upstream { margin: 8px 0 0; color: #17665b; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .repository-status[data-state="unset"] .repository-status-upstream { color: #936016; }
 .repository-status .repository-status-sync { margin: 4px 0 0; color: #65798a; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+@media (max-width: 920px) {
+  .repo-body.has-side { grid-template-columns: minmax(0, 1fr); overflow: auto; }
+  .repo-body.has-side .repo-main, .repo-body.has-side .repo-side { max-height: none; overflow: visible; }
+}
 @media (max-width: 680px) {
   .repository-status { margin: 0 12px 12px; padding: 10px 12px; }
   .repository-status-branch { flex-basis: 100%; order: 1; }
   .repository-browser { width: calc(100vw - 16px); height: calc(100dvh - 16px); max-height: calc(100dvh - 16px); }
-  .repo-header { padding: 14px; }
-  .repo-identity h2 { font-size: 17px; }
-  .repo-identity { gap: 7px; }
-  .repo-code-tab { padding: 0 14px; }
-  .repo-controls { padding: 14px 14px 6px; gap: 10px; }
+  .repo-header { padding: 10px 14px; }
+  .repo-code-tab { display: none; }
+  .repo-toolbar { padding: 10px 14px; gap: 8px; }
+  .repo-controls { width: 100%; }
   .repo-control { flex: 1; }
   .repo-control select { min-width: 0; width: 100%; font-size: 16px; }
-  .repo-file-count { flex-basis: 100%; margin: 0; padding: 0; }
-  .repository-browser .repo-hint { padding: 4px 14px 12px; }
-  .repo-notice { margin: 0 14px 10px; }
-  .repo-body { padding: 0 14px 14px; }
+  .repo-breadcrumb { width: 100%; }
+  .repository-browser .repo-hint { flex-basis: 100%; }
+  .repo-notice { margin: 8px 14px 0; }
+  .repo-body { padding: 12px 14px 14px; }
   /* 窄屏仍显示逐文件提交信息，第二行完整换行，右侧保留时间。 */
-  .repo-list-heading, .repo-file-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding-left: 12px; padding-right: 12px; }
+  .repo-list-heading, .repo-file-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding-left: 12px; padding-right: 12px; }
   .repo-list-heading > span:nth-child(2), .repo-list-heading > span:last-child, .repo-entry-size { display: none; }
   .repo-file-row > .repo-commit-link, .repo-file-row > .repo-history-missing { grid-column: 1 / -1; grid-row: 2; }
   .repo-file-row > .repo-entry-time { grid-column: 2; grid-row: 1; }
   .repo-file-row .repo-commit-message { white-space: normal; overflow-wrap: anywhere; }
-  .repo-latest { gap: 8px; padding: 10px 12px; }
-  .repo-file-history { flex-wrap: wrap; padding: 10px 12px; }
+  .repo-latest { gap: 8px; padding: 8px 12px; }
+  .repo-file-history { flex-wrap: wrap; padding: 8px 12px; }
   .repo-file-history .repo-commit-link { flex-basis: calc(100% - 80px); }
   .repo-commit-header { flex-wrap: wrap; }
   .repo-line-number { width: 40px; padding-right: 10px; }
-  .repo-file-header { padding: 10px 12px; }
+  .repo-file-header { padding: 9px 12px; }
 }
 
 /* 身份名称比原来的“本地仓库”更长，手机上分行显示选择器以保留完整名称。 */
@@ -196,6 +224,3 @@ body.repository-browser-open { overflow: hidden !important; }
 .remote-sync table code { color: #7dd3fc; }
 .remote-sync-stale { display: block; margin-top: 3px; color: #fbbf24; font-size: 10px; }
 .remote-sync .remote-sync-note { margin-bottom: 0; line-height: 1.7; color: #94a3b8; }
-
-/* 卡片保留内容高度，由侧栏统一滚动；禁止 flex 压缩后被卡片的圆角裁切隐藏正文。 */
-.repo-side > section { flex: none; }

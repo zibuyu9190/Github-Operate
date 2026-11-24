@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="description" content="输入 Git 命令，用提交图看懂分支、合并与远程协作。完全离线的虚拟仓库练习。">
   <title>Git 图解实验室 · Git Playground</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%2327394c'/%3E%3Cpath d='M12 10v20m0-10c15 0 16-4 16-10' fill='none' stroke='%2376ffbf' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%230f172a'/%3E%3Cpath d='M12 10v20m0-10c15 0 16-4 16-10' fill='none' stroke='%2310b981' stroke-width='3'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="command-assist.css">
   <link rel="stylesheet" href="lessons.css">
@@ -18,53 +18,222 @@
   <script defer src="lessons.js"></script>
   <script defer src="graph.js"></script>
   <script defer src="graph-viewer.js"></script>
+  <script defer src="repo-browser.js"></script>
+  <script defer src="repo-status.js"></script>
   <script defer src="terminal-history.js"></script>
+  <script defer src="replay.js"></script>
+  <script defer src="help-manual.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
   <header class="app-header">
-    <a class="brand" href="index.html" aria-label="Git 图解实验室首页"><span class="brand-icon" aria-hidden="true">⑂</span><span>Git 图解实验室<small>GIT PLAYGROUND</small></span></a>
-    <span class="local-badge"><i></i> 离线模拟 · 自由练习</span>
-    <div class="header-actions"><button id="help-button" class="button quiet">命令手册 <kbd>?</kbd></button><button id="restart" class="button quiet">↻ 重置场景</button></div>
-  </header>
-  <main class="layout">
-    <aside class="sidebar" aria-label="练习场景">
-      <div class="eyebrow">LEARN BY DOING</div><h2>选择一个起点</h2>
-      <nav id="scenes"></nav>
-      <div class="rail-note"><span class="note-symbol">↗</span><strong>让命令变得看得见</strong><p>每个圆点是一次提交。<br>每个标签是一条分支。<br>箭头指向它的父提交。</p><span>虚拟仓库，放心尝试。</span></div>
-      <div class="rail-footer">无需安装 · 无需账号<br>刷新页面即重新开始</div>
-    </aside>
-    <section class="workspace" aria-labelledby="scene-title">
-      <div class="intro"><div><div class="eyebrow" id="scene-number">EXPERIMENT 01 / 06</div><h1 id="scene-title">基础提交</h1><p id="scene-subtitle"></p></div><div class="current-branch"><span>HEAD</span><b id="head-label">main</b></div></div>
-      <div class="playground">
-        <section class="panel visual-panel" aria-labelledby="graph-title">
-          <div class="panel-heading"><h2 id="graph-title"><span class="section-dot blue"></span>提交关系图</h2><div class="graph-tools"><button class="icon-button" id="zoom-out" aria-label="缩小关系图">−</button><button class="icon-button" id="zoom-reset" aria-label="恢复默认缩放">适应</button><button class="icon-button" id="zoom-in" aria-label="放大关系图">＋</button></div></div>
-          <div class="graph-stage" id="graph-stage"><svg id="graph" role="group" aria-label="Git 提交关系图"></svg><span class="canvas-caption">COMMITS & BRANCHES</span></div>
-          <div class="graph-legend"><span><i class="legend-node current"></i>当前提交</span><span><i class="legend-node"></i>普通提交</span><span><i class="legend-dash"></i>失去引用的历史</span><span>点击节点查看快照</span></div>
-          <details class="commit-detail" id="commit-detail"><summary id="commit-summary">选择一个提交，查看它的文件快照</summary><div id="commit-content"></div></details>
-        </section>
-        <section class="panel command-panel" aria-labelledby="terminal-title">
-          <div class="panel-heading"><h2 id="terminal-title"><span class="terminal-symbol">›_</span>命令终端</h2><span class="small-muted">模拟环境</span></div>
-          <div class="terminal" id="terminal" role="log" aria-label="命令执行记录" aria-live="polite"></div>
-          <form id="command-form" autocomplete="off"><label class="sr-only" for="command">Git 命令</label><div class="command-input"><span aria-hidden="true">$</span><input id="command" name="command" placeholder="git status" spellcheck="false" autocomplete="off" autocapitalize="off"><button type="submit" aria-label="执行命令">↵</button></div><div class="input-tip"><span>Enter 执行</span><span>↑ ↓ 历史命令</span></div></form>
-          <div class="suggestions"><div class="small-label">试试这些命令 <span>点击填入</span></div><div id="quick-commands"></div></div>
-          <details id="remote-sync" class="remote-panel remote-sync">
-            <summary>远程同步状态</summary>
-          </details>
-        </section>
+    <a class="brand" href="index.html" aria-label="Git 图解实验室首页">
+      <span class="brand-icon" aria-hidden="true">⑂</span>
+      <span class="brand-text">Git 图解实验室<small>离线交互工作台</small></span>
+    </a>
+    <nav id="scenes" class="scene-nav" aria-label="练习场景"></nav>
+    <div class="header-actions">
+      <div class="current-branch" title="当前 HEAD 指向">
+        <span>HEAD</span>
+        <b id="head-label">main</b>
       </div>
-      <section class="transition-card" aria-label="命令变化讲解"><div class="transition-icon" aria-hidden="true">↳</div><div class="transition-copy"><strong id="explanation-title">从一次小小的改动开始</strong><p id="explanation" aria-live="polite"></p><div id="flow" class="flow" aria-hidden="true"></div></div><button id="replay" class="button quiet" disabled>▷ 重播变化</button></section>
+      <button id="help-button" class="button quiet">命令手册 <kbd>?</kbd></button>
+      <div class="scene-reset-actions">
+        <button id="restart" type="button" class="button quiet">↻ 重置场景</button>
+        <button id="undo-restart" type="button" class="button quiet" title="恢复上次重置前的练习，替换当前进度（仅一次）" disabled>撤销重置</button>
+      </div>
+      <span id="scene-reset-status" class="sr-only" role="status"></span>
+    </div>
+  </header>
+
+  <main class="workbench" aria-labelledby="scene-title">
+    <!-- 左侧主舞台：提交关系图 + 变化讲解条 + 文件与三区对比 -->
+    <div class="stage-column">
+      <section class="panel visual-panel" aria-labelledby="graph-title">
+        <div class="panel-heading graph-header">
+          <div class="scene-banner">
+            <span class="scene-badge" id="scene-number">01 / 09</span>
+            <h1 id="scene-title">基础提交</h1>
+            <p id="scene-subtitle"></p>
+          </div>
+          <div class="graph-controls">
+            <div class="graph-legend" aria-label="图例">
+              <span><i class="legend-node current"></i>当前提交</span>
+              <span><i class="legend-node"></i>本地提交</span>
+              <span><i class="legend-node remote"></i>仅远程</span>
+              <span><i class="legend-dash"></i>无引用历史</span>
+            </div>
+            <div class="graph-tools">
+              <button class="icon-button" id="zoom-out" aria-label="缩小关系图" title="缩小">−</button>
+              <button class="icon-button" id="zoom-reset" aria-label="适应提交图画布" title="适应画布">适应</button>
+              <button class="icon-button" id="zoom-default" aria-label="恢复默认可读缩放" title="恢复默认可读缩放">默认</button>
+              <button class="icon-button" id="zoom-in" aria-label="放大关系图" title="放大">＋</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="graph-stage" id="graph-stage">
+          <svg id="graph" role="group" aria-label="Git 提交关系图"></svg>
+          <span class="canvas-caption" id="graph-title">点击提交节点可查看快照 · 箭头指向父提交</span>
+        </div>
+
+        <details class="commit-detail" id="commit-detail">
+          <summary id="commit-summary">选择一个提交，查看它的文件快照</summary>
+          <div id="commit-content"></div>
+        </details>
+      </section>
+
+      <section class="transition-card" aria-label="命令变化讲解">
+        <div class="transition-icon" aria-hidden="true">↳</div>
+        <div class="transition-copy">
+          <div class="transition-Headline">
+            <strong id="explanation-title">从一次小小的改动开始</strong>
+            <div id="flow" class="flow" aria-hidden="true"></div>
+          </div>
+          <p id="explanation" aria-live="polite"></p>
+        </div>
+        <button id="replay" class="button quiet small" disabled>▷ 重播变化</button>
+      </section>
+
       <section class="panel files-panel" aria-labelledby="files-title">
-        <div class="panel-heading files-heading"><h2 id="files-title"><span class="section-dot green"></span>文件与三个区域</h2><div class="file-tools"><label class="sr-only" for="file-select">选择文件</label><select id="file-select"></select><button id="new-file" class="button quiet">＋ 新文件</button></div></div>
-        <form id="new-file-form" class="new-file-form" hidden><label for="new-path">相对文件路径</label><input id="new-path" placeholder="例如 notes.txt" maxlength="120" autocomplete="off"><button class="button primary" type="submit">创建</button><button id="cancel-new" class="button quiet" type="button">取消</button></form>
-        <div id="conflict-panel" class="conflict-panel" hidden><div class="conflict-heading"><strong id="conflict-title">冲突待解决</strong><span id="conflict-tip"></span></div><div class="conflict-versions"><div><span>共同基点</span><pre id="conflict-base"></pre></div><div><span id="ours-label">当前版本</span><pre id="conflict-ours"></pre><button id="use-ours" class="text-button">使用此版本</button></div><div><span id="theirs-label">传入版本</span><pre id="conflict-theirs"></pre><button id="use-theirs" class="text-button">使用此版本</button></div></div></div>
-        <div class="file-state" id="file-state"></div>
-        <div class="areas"><div class="area"><div class="area-heading"><strong><span class="area-number">01</span>当前提交</strong><span>HEAD</span></div><pre id="head-file" class="code-view" aria-label="HEAD 文件快照"></pre><div class="area-footer">最近一次提交保存的内容</div></div><div class="area"><div class="area-heading"><strong><span class="area-number">02</span>暂存区</strong><span>INDEX</span></div><pre id="index-file" class="code-view" aria-label="暂存区文件快照"></pre><div class="area-footer">git add 时的快照 · 绿色为新增，红色为删除</div></div><div class="area work-area"><div class="area-heading"><strong><span class="area-number">03</span>工作区</strong><span>WORKTREE</span></div><label class="sr-only" for="file-editor">编辑工作区文件</label><textarea id="file-editor" spellcheck="false" wrap="off" placeholder="在这里编辑文件内容…"></textarea><div class="area-footer editor-footer"><span id="editor-status">编辑后保存到工作区</span><div><button id="delete-file" class="text-button danger">删除</button><button id="save-file" class="button primary small">保存改动</button></div></div></div></div>
+        <div class="panel-heading files-heading">
+          <div class="files-title-group">
+            <h2 id="files-title"><span class="section-dot green"></span>文件与三个区域</h2>
+            <div class="file-state" id="file-state"></div>
+          </div>
+          <div class="file-tools">
+            <label class="sr-only" for="file-select">选择文件</label>
+            <select id="file-select"></select>
+            <button id="new-file" class="button quiet small">＋ 新文件</button>
+          </div>
+        </div>
+
+        <form id="new-file-form" class="new-file-form" hidden>
+          <label for="new-path">相对文件路径</label>
+          <input id="new-path" placeholder="例如 notes.txt" maxlength="120" autocomplete="off">
+          <button class="button primary small" type="submit">创建</button>
+          <button id="cancel-new" class="button quiet small" type="button">取消</button>
+        </form>
+
+        <div id="conflict-panel" class="conflict-panel" hidden>
+          <div class="conflict-heading">
+            <strong id="conflict-title">冲突待解决</strong>
+            <span id="conflict-tip"></span>
+          </div>
+          <div class="conflict-versions">
+            <div class="conflict-card base-card">
+              <div class="conflict-card-header">
+                <span>共同基点 · BASE</span>
+              </div>
+              <pre id="conflict-base"></pre>
+            </div>
+            <div class="conflict-card ours-card">
+              <div class="conflict-card-header">
+                <span id="ours-label">当前版本</span>
+                <button id="use-ours" class="text-button conflict-use-btn" type="button">使用此版本</button>
+              </div>
+              <pre id="conflict-ours"></pre>
+            </div>
+            <div class="conflict-card theirs-card">
+              <div class="conflict-card-header">
+                <span id="theirs-label">传入版本</span>
+                <button id="use-theirs" class="text-button conflict-use-btn" type="button">使用此版本</button>
+              </div>
+              <pre id="conflict-theirs"></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="areas">
+          <div class="area work-area">
+            <div class="area-heading">
+              <strong><span class="area-number">01</span>工作区</strong>
+              <span>WORKTREE · 直接编辑</span>
+            </div>
+            <label class="sr-only" for="file-editor">编辑工作区文件</label>
+            <textarea id="file-editor" spellcheck="false" wrap="off" placeholder="在这里编辑文件内容…"></textarea>
+            <div class="area-footer editor-footer">
+              <span id="editor-status">编辑后保存到工作区</span>
+              <div>
+                <button id="delete-file" class="text-button danger">删除</button>
+                <button id="save-file" class="button primary small">保存改动</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="area index-area">
+            <div class="area-heading">
+              <strong><span class="area-number">02</span>暂存区</strong>
+              <span>INDEX · git add 快照</span>
+            </div>
+            <pre id="index-file" class="code-view" aria-label="暂存区文件快照"></pre>
+            <div class="area-footer">相对 HEAD：绿色为新增，红色为删除</div>
+          </div>
+
+          <div class="area head-area">
+            <div class="area-heading">
+              <strong><span class="area-number">03</span>当前提交</strong>
+              <span>HEAD · 已提交快照</span>
+            </div>
+            <pre id="head-file" class="code-view" aria-label="HEAD 文件快照"></pre>
+            <div class="area-footer">最近一次 git commit 保存的内容</div>
+          </div>
+        </div>
+
         <div id="file-message" class="file-message" role="status"></div>
       </section>
-      <footer class="workspace-footer"><span>小步尝试，看懂每一次变化。</span><span>C 编号为模拟提交标识 · 仅支持普通文本文件</span></footer>
-    </section>
+    </div>
+
+    <!-- 右侧常驻边栏：命令终端 + 快捷命令 + 虚拟远程 -->
+    <aside class="dock-column" aria-label="命令与远程控制">
+      <section class="panel command-panel" aria-labelledby="terminal-title">
+        <div class="panel-heading terminal-heading">
+          <h2 id="terminal-title"><span class="terminal-symbol">›_</span>命令终端</h2>
+          <span class="small-muted">离线沙盒 · 支持组合练习</span>
+        </div>
+
+        <div class="terminal" id="terminal" role="log" aria-label="命令执行记录" aria-live="polite"></div>
+
+        <form id="command-form" autocomplete="off">
+          <label class="sr-only" for="command">Git 命令</label>
+          <div class="command-input">
+            <span aria-hidden="true">$</span>
+            <input id="command" name="command" placeholder="输入 Git 命令，如 git status" spellcheck="false" autocomplete="off" autocapitalize="off">
+            <button type="submit" aria-label="执行命令" title="执行 (Enter)">↵</button>
+          </div>
+          <div class="input-tip">
+            <span>Enter 执行命令</span>
+            <span>↑ ↓ 切换历史记录</span>
+          </div>
+        </form>
+
+        <div class="suggestions">
+          <div class="small-label">当前场景推荐命令 <span>点击填入终端</span></div>
+          <div id="quick-commands"></div>
+        </div>
+
+        <details id="remote-sync" class="remote-panel remote-sync">
+          <summary>远程同步状态</summary>
+        </details>
+      </section>
+    </aside>
   </main>
-  <dialog id="help-dialog" aria-labelledby="help-title"><div class="dialog-heading"><div><div class="eyebrow">COMMAND REFERENCE</div><h2 id="help-title">命令手册</h2></div><button id="close-help" class="icon-button" aria-label="关闭命令手册">×</button></div><p>支持下面列出的命令与参数，可连续组合使用。点击示例填入终端。文件名或说明包含空格时请加引号。</p><div id="help-content"></div><div class="help-boundary"><strong>教学版边界</strong><p>所有操作只影响当前页面。merge、rebase、revert、cherry-pick、pull 开始前要求工作区干净。默认 pull 使用合并方式。暂不支持二进制、重命名检测、文件/目录冲突、多合并基点、交互式变基、重放或摘取合并提交、强制推送及其他未列出的参数。不会执行 Shell 或连接 GitHub。手册中“仅供参考”的命令用于真实终端，网页不会执行。</p><p>add 会把冲突文件标记为已解决，即使文件还留有冲突标记；请检查内容再继续。刷新页面会重置练习，文件大小限制为 300 行、20000 字符。</p></div></dialog>
+
+  <dialog id="help-dialog" aria-labelledby="help-title">
+    <div class="dialog-heading">
+      <div>
+        <div class="eyebrow">COMMAND REFERENCE</div>
+        <h2 id="help-title">支持的 Git 命令手册</h2>
+      </div>
+      <button id="close-help" class="icon-button" aria-label="关闭命令手册">×</button>
+    </div>
+    <p>支持下面列出的命令与参数，可连续组合使用。点击任意示例即可自动填入终端。文件名或提交说明包含空格时请加引号。</p>
+    <div id="help-content"></div>
+    <div class="help-boundary">
+      <strong>教学版边界说明</strong>
+      <p>所有操作只影响当前页面内存中的虚拟仓库。<code>merge</code>、<code>rebase</code>、<code>revert</code>、<code>cherry-pick</code>、<code>pull</code> 开始前要求工作区干净。默认 <code>pull</code> 使用合并方式。暂不支持二进制、重命名检测、文件/目录冲突、多合并基点、交互式变基、重放或摘取合并提交、强制推送及其他未列出的参数。手册中“仅供参考”的命令用于真实终端，网页不会执行。</p>
+      <p><code>git add</code> 会把冲突文件标记为已解决，即使文件还留有冲突标记；请检查内容再继续。刷新页面会重置练习，单文件大小限制为 300 行、20000 字符。</p>
+    </div>
+  </dialog>
 </body>
 </html>

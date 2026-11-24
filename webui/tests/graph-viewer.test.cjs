@@ -40,33 +40,35 @@ function fixture() {
   const toolbar = new Element('div'), parent = new Element('section'), stage = new Element('div'), svg = new Element('svg'), details = new Element('details');
   document = { body: new Element('body'), createElement: tag => new Element(tag), createComment: () => new Element('#comment'), querySelector: () => toolbar };
   document.body.append(toolbar, parent); parent.append(stage, details); stage.append(svg); document.activeElement = stage;
-  const context = vm.createContext({ document, GitSimulator: { edits }, window: { getSelection: () => ({ toString: () => '' }) } });
+  const context = vm.createContext({ document, GitSimulator: { edits }, CommitGraph: { DEFAULT_ZOOM: .95 }, window: { getSelection: () => ({ toString: () => '' }) } });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../graph-viewer.js'), 'utf8'), context);
   const sim = new Simulator('branches'), before = sim.snapshot(), selections = []; let prepares = 0;
   const graph = {
-    zoom: 1.8, fitted: false, onSelect: commit => selections.push(commit.id), draw() {}, resize() {},
-    setZoom(value) { this.fitted = false; this.zoom = Math.max(.6, Math.min(2.5, value)); },
-    fit() { this.fitted = true; this.zoom = .4; }
+    zoom: .75, fitted: false, onSelect: commit => selections.push(commit.id), draw() {},
+    get canZoomIn() { return this.zoom < 1; },
+    get canZoomOut() { return this.zoom > .6; },
+    setZoom(value) { this.fitted = false; this.zoom = Math.max(.6, Math.min(1, value)); },
+    fit() { this.fitted = true; this.zoom = 1; }
   };
   const viewer = new context.GitGraphViewer(graph, stage, () => ({ title: '分支与合并', state: sim.state }), () => { prepares++; });
   return { viewer, graph, stage, svg, details, parent, document, sim, before, selections, prepares: () => prepares, Element };
 }
 
-test('重复打开关闭大图只搬移原画布，不复制 SVG，保留仓库、缩放与滚动位置', () => {
-  const f = fixture(); f.stage.scrollLeft = 23; f.stage.scrollTop = 79;
+test('重复打开关闭大图只搬移原画布，不复制 SVG，保留仓库和主图缩放', () => {
+  const f = fixture();
   for (let n = 0; n < 3; n++) {
     f.viewer.open(); f.viewer.open();
-    assert.equal(f.viewer.canvas.children[0], f.stage); assert.equal(f.stage.children[0], f.svg); assert.equal(f.graph.zoom, 1);
-    f.viewer.zoomIn.fire('click'); f.stage.scrollTop = 200; f.stage.scrollLeft = 100;
+    assert.equal(f.viewer.canvas.children[0], f.stage); assert.equal(f.stage.children[0], f.svg); assert.equal(f.graph.zoom, .95);
+    f.viewer.zoomIn.fire('click');
     f.viewer.closeButton.fire('click');
-    assert.deepEqual(f.parent.children, [f.stage, f.details]); assert.equal(f.graph.zoom, 1.8);
-    assert.equal(f.stage.scrollLeft, 23); assert.equal(f.stage.scrollTop, 79); assert.equal(f.document.activeElement, f.stage);
+    assert.deepEqual(f.parent.children, [f.stage, f.details]); assert.equal(f.graph.zoom, .75);
+    assert.equal(f.document.activeElement, f.stage);
     assert.equal(f.document.body.classes.has('graph-viewer-open'), false); assert.deepEqual(f.sim.snapshot(), f.before);
   }
   assert.equal(f.prepares(), 3);
 });
 
-test('画布与独立按钮均能打开，键盘仅处理画布本身，滚动条点击不误触发', () => {
+test('画布与独立按钮均能打开，键盘仅处理画布本身，边界外点击不触发', () => {
   const f = fixture();
   f.stage.fire('click', { clientX: 620, clientY: 20 }); assert.ok(!f.viewer.dialog.open);
   f.stage.fire('click', { clientX: 40, clientY: 40 }); assert.equal(f.viewer.dialog.open, true); f.viewer.dialog.close();
@@ -83,10 +85,15 @@ test('主画布已适应时打开大图仍保持可读，关闭后恢复适应�
   f.graph.fit();
   f.viewer.open();
   assert.equal(f.graph.fitted, false);
-  assert.equal(f.graph.zoom, 1);
+  assert.equal(f.graph.zoom, .95);
   f.viewer.zoom();
   assert.equal(f.viewer.zoomLabel.textContent, '适应');
-  assert.equal(f.viewer.zoomOut.disabled, true);
+  assert.equal(f.viewer.zoomOut.disabled, false);
+  f.viewer.defaultZoom.fire('click');
+  assert.equal(f.graph.fitted, false);
+  assert.equal(f.graph.zoom, .95);
+  assert.equal(f.viewer.zoomLabel.textContent, '95%');
+  assert.equal(f.viewer.zoomOut.disabled, false);
   f.viewer.closeButton.fire('click');
   assert.equal(f.graph.fitted, true);
 });
@@ -95,7 +102,7 @@ test('弹窗内点击不误关，遮罩点击关闭后可恢复，缩放端点�
   const f = fixture(); f.viewer.open();
   f.viewer.dialog.fire('click', { clientX: 40, clientY: 40 }); assert.equal(f.viewer.dialog.open, true);
   f.viewer.zoom(.6); assert.equal(f.viewer.zoomOut.disabled, true); assert.equal(f.viewer.zoomIn.disabled, false);
-  f.viewer.zoom(2.5); assert.equal(f.viewer.zoomIn.disabled, true); assert.equal(f.viewer.zoomLabel.textContent, '250%');
+  f.viewer.zoom(1); assert.equal(f.viewer.zoomIn.disabled, true); assert.equal(f.viewer.zoomLabel.textContent, '100%');
   f.viewer.dialog.fire('click', { clientX: 0, clientY: 0 });
   assert.equal(f.viewer.dialog.open, false); assert.equal(f.stage.parentNode, f.parent);
 });
@@ -106,7 +113,7 @@ test('关闭事件延迟时立即重开，大图仍保留在弹窗内，最终�
   f.viewer.open(); f.viewer.dialog.fire('close');
   assert.equal(f.viewer.dialog.open, true); assert.equal(f.stage.parentNode, f.viewer.canvas);
   f.viewer.dialog.close();
-  assert.deepEqual(f.parent.children, [f.stage, f.details]); assert.equal(f.graph.zoom, 1.8);
+  assert.deepEqual(f.parent.children, [f.stage, f.details]); assert.equal(f.graph.zoom, .75);
 });
 
 test('节点更新纯文本详情但默认折叠，手动展开状态保留，文件中的 HTML 不生成元素', () => {

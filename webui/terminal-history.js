@@ -1,7 +1,8 @@
 (function (root) {
   'use strict';
 
-  const ACTORS = { local: '我的本地', remote: '协作者本地', all: '全部身份' };
+  const { ACTORS } = typeof module !== 'undefined' && module.exports ? require('./simulator.js') : root.GitSimulator;
+  const label = actor => actor === 'all' ? '全部身份' : ACTORS[actor].terminal;
   const statusOf = result => !result ? '已执行' : !result.ok ? '失败' : result.conflict ? '待解决冲突' : result.paused ? '已暂停' : '成功';
   const dateText = timestamp => new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
 
@@ -10,13 +11,13 @@
     constructor() { this.entries = []; }
 
     record({ actor, branch, scene, command, output = '', result, timestamp = Date.now() }) {
-      if (!['local', 'remote'].includes(actor)) throw new Error('未知的命令执行身份。');
+      if (!Object.hasOwn(ACTORS, actor)) throw new Error('未知的命令执行身份。');
       if (!command.trim()) return;
       this.entries.push(Object.freeze({ sequence: this.entries.length + 1, actor, branch: branch || '分离 HEAD', scene, command, output: String(output), status: statusOf(result), timestamp }));
     }
 
     list(scope = 'all') {
-      if (!Object.hasOwn(ACTORS, scope)) throw new Error('未知的命令复制范围。');
+      if (scope !== 'all' && !Object.hasOwn(ACTORS, scope)) throw new Error('未知的命令复制范围。');
       return this.entries.filter(entry => scope === 'all' || entry.actor === scope);
     }
 
@@ -26,10 +27,10 @@
     format(scope, { scene }) {
       const entries = this.list(scope);
       if (!entries.length) return null;
-      const lines = ['Git 图解实验室 · 历史命令', '练习：' + scene, '复制范围：' + ACTORS[scope], '命令数量：' + entries.length,
+      const lines = ['Git 图解实验室 · 历史命令', '练习：' + scene, '复制范围：' + label(scope), '命令数量：' + entries.length,
         '仅包含本轮实际执行记录（含失败和按钮执行的 Git 命令），不包含未执行草稿。', ''];
       for (const entry of entries) {
-        lines.push('[' + entry.sequence + '] ' + dateText(entry.timestamp) + ' | ' + ACTORS[entry.actor] + ' | 分支：' + entry.branch + ' | ' + entry.status,
+        lines.push('[' + entry.sequence + '] ' + dateText(entry.timestamp) + ' | ' + label(entry.actor) + ' | 分支：' + entry.branch + ' | ' + entry.status,
           '$ ' + entry.command, entry.output, '');
       }
       return { text: lines.join('\n').replace(/\r\n?/g, '\n'), count: entries.length };
@@ -75,7 +76,7 @@
       const count = this.history.list(actor).length;
       this.button.disabled = !count;
       this.button.textContent = '复制历史' + (count ? '（' + count + '）' : '');
-      this.button.title = count ? '复制' + ACTORS[actor] + '本次练习的全部命令和执行结果' : '当前窗口暂无已执行命令';
+      this.button.title = count ? '复制' + label(actor) + '本次练习的全部命令和执行结果' : '当前窗口暂无已执行命令';
     }
 
     reset() { this.generation++; this.actor = this.readContext().actor; this.feedback.textContent = ''; this.update(); }
@@ -83,7 +84,7 @@
     async copyHistory() {
       const context = this.readContext(), scope = context.actor, history = this.history.format(scope, context), generation = this.generation;
       if (!history) return;
-      try { await this.copy(history.text); if (generation === this.generation) this.feedback.textContent = '已复制：' + ACTORS[scope] + '，共 ' + history.count + ' 条命令。'; }
+      try { await this.copy(history.text); if (generation === this.generation) this.feedback.textContent = '已复制：' + label(scope) + '，共 ' + history.count + ' 条命令。'; }
       catch { if (generation === this.generation) this.feedback.textContent = '复制失败，请检查浏览器剪贴板权限后重试。'; }
     }
   }

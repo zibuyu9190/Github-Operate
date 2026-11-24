@@ -4,15 +4,17 @@
 .terminal-context { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 7px 10px; padding: 10px 14px; background: #172236; color: #cbd5e1; border-bottom: 1px solid #334155; }
 .command-panel.has-terminal-context { overflow-y: auto; }
 .has-terminal-context .terminal { flex: 1 0 150px; min-height: 150px; }
-.terminal-modes { display: flex; gap: 4px; padding: 3px; border: 1px solid #475569; border-radius: 7px; }
+.terminal-modes { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border: 1px solid #475569; border-radius: 7px; }
 .terminal-modes button { border: 1px solid transparent; border-radius: 4px; background: transparent; color: #cbd5e1; padding: 4px 9px; font: inherit; font-size: 11px; cursor: pointer; }
 .terminal-modes button[aria-pressed="true"] { color: #d1fae5; background: #065f46; border-color: #10b981; }
 .terminal-context.is-remote .terminal-modes button[aria-pressed="true"] { color: #ede9fe; background: #5b21b6; border-color: #a78bfa; }
+.terminal-context.is-integrator .terminal-modes button[aria-pressed="true"] { color: #dbeafe; background: #1e40af; border-color: #60a5fa; }
 .terminal-modes button:focus-visible, .terminal-branch select:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
 .terminal-branch { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 10px; }
 .terminal-branch select { min-width: 70px; max-width: 150px; padding: 4px; border: 1px solid #64748b; border-radius: 4px; background: #0f172a; color: #f1f5f9; }
 .terminal-scope { flex-basis: 100%; margin: 0; color: #a7f3d0; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
 .terminal-context.is-remote .terminal-scope { color: #ddd6fe; }
+.terminal-context.is-integrator .terminal-scope { color: #bfdbfe; }
 .terminal-branch[hidden] { display: none; }
 .command-completions {
   position: absolute; z-index: 30; bottom: calc(100% - 2px); left: 10px; right: 10px;
@@ -36,22 +38,122 @@
 .workbench .recommended-command small, .workbench .command-assist-hint, .workbench .suggestions .small-label > span { color: #94a3b8; }
 @media (max-width: 700px) { .command-completions { left: 6px; right: 6px; max-height: 200px; } }
 
-/* 手册将可练习的单条示例与真实终端组合行分开，长命令在窄屏中换行。 */
-.help-note { margin: 6px 0 10px; font-size: 12px; line-height: 1.7; color: #475569; overflow-wrap: anywhere; }
-.help-template-row { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
-.help-template-row > span { max-width: none; line-height: 1.65; }
-.help-template-row .command-chip { text-align: left; white-space: normal; overflow-wrap: anywhere; }
-.help-terminal-note { padding: 10px 12px; background: #fffbeb; color: #92400e; border: 1px solid #fde68a; border-radius: 7px; }
-.help-flow { margin-top: 10px; padding: 12px; border: 1px solid #dbe3ec; border-radius: 8px; }
-.help-flow h4 { margin: 0 0 8px; font-size: 12px; color: #0f172a; }
-.help-chain { margin: 0; padding: 10px; background: #f1f5f9; border-radius: 5px; font: 11px/1.7 var(--mono, monospace); color: #0f172a; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-.help-step-label { font-size: 11px; line-height: 1.6; color: #64748b; margin-bottom: 5px; }
+/* 手册将可练习的单条示例与真实终端组合行分开，采用双列/三列卡片网格避免纵向长滚动。 */
+.help-section-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+.help-section-bar h3 { margin: 0; white-space: nowrap; }
+.help-section-bar .help-note { margin: 0; font-size: 11.5px; color: #475569; }
+.help-note { margin: 4px 0 6px; font-size: 11.5px; line-height: 1.5; color: #475569; overflow-wrap: anywhere; }
+
+.help-template-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+.help-template-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+}
+.help-template-row:last-child {
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 10px;
+}
+.help-template-row > span {
+  max-width: none;
+  text-align: left;
+  line-height: 1.45;
+  font-size: 11.5px;
+  color: #475569;
+}
+.help-template-row .command-chip {
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  background: #0f172a;
+  color: #34d399;
+  border-color: #1e293b;
+  padding: 5px 10px;
+  font-size: 11.5px;
+}
+.help-template-row .command-chip:hover {
+  background: #1e293b;
+  color: #6ee7b7;
+  border-color: #34d399;
+}
+
+.help-workflow-topbar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+.help-workflow-topbar h3 { margin: 0; color: #92400e; white-space: nowrap; }
+.help-terminal-note { margin: 0; padding: 0; background: transparent; color: #92400e; border: 0; font-size: 11px; line-height: 1.45; }
+.help-sources { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; white-space: nowrap; font-size: 11px; }
+.help-sources a { color: #0f766e; font-weight: 600; text-decoration: none; }
+.help-sources a:hover { text-decoration: underline; }
+
+.help-workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.help-flow {
+  margin: 0;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #dbe3ec;
+  border-radius: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.help-flow h4 { margin: 0; font-size: 12px; color: #0f172a; }
+.help-chain {
+  margin: 0;
+  padding: 6px 9px;
+  background: #0f172a;
+  border-radius: 6px;
+  font: 11px/1.5 var(--mono, monospace);
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.help-flow .help-note { margin: 0; font-size: 11px; line-height: 1.45; }
+.help-step-label { font-size: 10.5px; line-height: 1.4; color: #64748b; margin-top: auto; padding-top: 2px; }
 .help-flow-steps { display: flex; flex-wrap: wrap; gap: 6px; }
-.help-flow-steps .command-chip { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; text-align: left; white-space: normal; }
+.help-flow-steps .command-chip { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; text-align: left; white-space: normal; font-weight: 600; }
 .help-flow-steps .command-chip:hover { background: #d1fae5; color: #064e3b; }
-.help-sources { display: flex; flex-wrap: wrap; gap: 6px 12px; }
-.help-sources a { color: #0f766e; }
-@media (max-width: 600px) { .help-template-row { grid-template-columns: minmax(0, 1fr); gap: 5px; } .help-flow { padding: 9px; } }
+
+@media (max-width: 960px) {
+  dialog { overflow: auto; }
+  .help-tabs, .help-template-grid, .help-workflow-grid, .help-bento-grid, .help-boundary, .help-workflow-topbar {
+    grid-template-columns: 1fr;
+  }
+  .help-section-bar { flex-direction: column; align-items: flex-start; }
+}
 
 /* 搜索栏在弹窗内保持可见，原节点筛选兼容分类页与离线页面布局。 */
 #help-dialog { overflow-y: auto; }
@@ -99,43 +201,29 @@
 .help-operation a { color: #3730a3; }
 .help-operation-badge.is-chain { border-color: #fde68a; background: #fef3c7; color: #92400e; }
 
-/* 远程目标独立于本地分支，用明确标签和原生选择框支持键盘及长分支名称。 */
-.remote-heading { flex-wrap: wrap; }
-.remote-branch-controls { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
-.remote-branch-controls label { flex: none; color: #cbd5e1; font-size: 11px; }
-.remote-branch-controls select {
-  flex: 1; min-width: 0; max-width: 100%; min-height: 30px; padding: 4px 6px;
-  border: 1px solid #475569; border-radius: 5px; background: #131c31; color: #e2e8f0;
-  font: 12px var(--mono, monospace); color-scheme: dark;
-}
-.remote-branch-controls select:focus-visible { outline: 2px solid #34d399; outline-offset: 2px; }
-.remote-branch-controls option:disabled { color: #94a3b8; }
-#remote-branch-hint { line-height: 1.6; overflow-wrap: anywhere; }
-.remote-ref span { min-width: 0; overflow-wrap: anywhere; }
-.remote-ref b { flex: none; }
-.remote-heading .text-button:disabled { opacity: .5; cursor: not-allowed; }
-
-/* 两种编辑身份复用三栏布局；协作者的保存、暂存和提交按钮与本地命令入口分开标识。 */
-.editor-mode-bar { display: flex; gap: 6px; padding: 9px 14px; border-bottom: 1px solid #dbe5ec; background: #f8fafc; }
+/* 各身份复用三栏布局，窄屏下允许角色按钮换行。 */
+.editor-mode-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 14px; border-bottom: 1px solid #dbe5ec; background: #f8fafc; }
 .editor-mode-bar button[aria-pressed="true"] { color: #065f46; background: #d1fae5; border-color: #34d399; font-weight: 700; }
-.remote-editor-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 14px; background: #f0fdfa; border-bottom: 1px solid #99f6e4; }
+#editor-remote[aria-pressed="true"] { color: #5b21b6; background: #ede9fe; border-color: #a78bfa; }
+#editor-integrator[aria-pressed="true"] { color: #1e40af; background: #dbeafe; border-color: #60a5fa; }
+.remote-editor-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 14px; background: var(--actor-surface); border-bottom: 1px solid var(--actor-border); }
 .remote-editor-toolbar label, .remote-editor-actions label { font-size: 12px; font-weight: 700; }
 .remote-editor-toolbar select { min-width: 90px; max-width: 100%; padding: 5px 8px; background: #fff; color: #0f172a; border: 1px solid #94a3b8; border-radius: 6px; }
 .remote-editor-base { flex-basis: 100%; margin: 0; color: #475569; font-size: 11px; overflow-wrap: anywhere; }
 .remote-editor-base.error { color: #b91c1c; }
-.remote-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 14px; border-top: 1px solid #dbe5ec; background: #f0fdfa; }
+.remote-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--actor-border); background: var(--actor-surface); }
 .remote-editor-actions input { flex: 1; min-width: 160px; padding: 8px 10px; border: 1px solid #94a3b8; border-radius: 6px; background: #fff; color: #0f172a; font: inherit; font-size: 12px; }
 .remote-editor-actions button:disabled { opacity: .5; cursor: not-allowed; }
 .remote-command-hint { flex-basis: 100%; margin: 0; color: #475569; font-size: 11px; line-height: 1.6; }
 .remote-editor-toolbar[hidden], .remote-editor-actions[hidden] { display: none; }
-.files-panel.editing-remote { overflow: auto; }
+.files-panel.editing-remote { --actor-surface: #f5f3ff; --actor-border: #ddd6fe; overflow: auto; }
+.files-panel.editing-integrator { --actor-surface: #eff6ff; --actor-border: #bfdbfe; }
 /* 新增控制栏不能挤掉文件内容；小屏三栏纵排后由内容撑高，避免最后一栏被遮住。 */
 .editing-remote .areas { flex-shrink: 0; min-height: 180px; }
-.editing-remote .area-heading { background: #f0fdfa; }
+.editing-remote .area-heading { background: var(--actor-surface); }
 @media (max-width: 680px) {
   .files-panel.editing-remote { flex: none; }
   .editing-remote .areas { flex: none; grid-auto-rows: minmax(180px, auto); }
-  .remote-branch-controls select { font-size: 16px; }
   .remote-editor-actions input { flex-basis: 100%; font-size: 16px; }
   .remote-editor-toolbar select { font-size: 16px; }
 }

@@ -1,13 +1,15 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-const { Simulator } = require('../simulator.js');
+const { Simulator, RemoteWorkspace } = require('../simulator.js');
+const { ReplayController } = require('../replay.js');
 
-/** 执行实际回放控制代码，用可推进的时钟检验完整生命周期，不等待真实秒数。 */
-function fixture({ reduced = false, collaborator = false } = {}) {
-  const sim = new Simulator('reset'), result = sim.execute('git reset --mixed HEAD~1');
+/** 执行实际回放控制器，用可推进的时钟检验完整生命周期，不等待真实秒数。 */
+function fixture({ reduced = false, collaborator = false, initialResult = null } = {}) {
+  let result = initialResult;
+  if (!result) {
+    const sim = new Simulator('reset');
+    result = sim.execute('git reset --mixed HEAD~1');
+  }
   if (collaborator) {
     result.graphBefore = structuredClone(result.before); result.graphAfter = structuredClone(result.after);
     result.graphBefore.branches = { dev: 'C2' }; result.graphBefore.head.branch = 'dev';
@@ -19,29 +21,28 @@ function fixture({ reduced = false, collaborator = false } = {}) {
   function element() {
     const classes = new Set();
     return {
-      hidden: false, textContent: '', disabled: false, attributes: {},
+      hidden: false, textContent: '', disabled: false, title: '', attributes: {},
       classList: { add: (...names) => names.forEach(n => classes.add(n)), remove: (...names) => names.forEach(n => classes.delete(n)), contains: name => classes.has(name) },
       style: { setProperty(name, value) { this[name] = value; } },
-      setAttribute(name, value) { this.attributes[name] = value; },
-      after(item) { elements.set(item.id, item); }
+      setAttribute(name, value) { this.attributes[name] = value; }
     };
   }
   const $ = id => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); };
-  const body = element(), panel = element();
-  const context = vm.createContext({
-    $, node: () => element(), document: { body }, filePanel: panel,
-    lastResult: result, replayTimer: null, graphState: () => current,
+  const panel = $('file-panel');
+  const controller = new ReplayController({
+    button: $('replay'),
+    stage: $('graph-stage'),
+    status: $('replay-status'),
+    flow: $('flow'),
+    filePanel: panel,
     graph: { draw: (state, options) => draws.push({ state: structuredClone(state), options: options && { ...options } }) },
+    getState: () => current,
     animateFiles: value => { fileAnimations.push(value); panel.classList.add('file-flowing'); },
     matchMedia: () => ({ matches: reduced }),
-    performance: { now: () => clock },
     setTimeout: (fn, delay) => { const id = nextId++; timers.set(id, { at: clock + delay, fn }); return id; },
     clearTimeout: id => timers.delete(id)
   });
-  const app = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
-  const start = app.indexOf('  const REPLAY_BEFORE_MS'), end = app.indexOf('\n  Object.entries(SCENES)', start);
-  assert.ok(start > 0 && end > start, '回放代码必须存在');
-  vm.runInContext(app.slice(start, end) + '\nglobalThis.controls = { replay, cancelReplay };', context);
+  controller.setResult(result);
   function advance(ms) {
     const end = clock + ms;
     while (timers.size) {
@@ -51,7 +52,12 @@ function fixture({ reduced = false, collaborator = false } = {}) {
     }
     clock = end;
   }
-  return { ...context.controls, context, $, body, panel, draws, fileAnimations, timers, result, current, saved, advance, elapse: ms => { clock += ms; } };
+  return {
+    controller,
+    replay: () => controller.replay(),
+    cancelReplay: () => controller.cancel(),
+    $, panel, draws, fileAnimations, timers, result, current, saved, advance, elapse: ms => { clock += ms; }
+  };
 }
 
 test('只在变化前保持 2.5 秒，显示结果后立即结束，按钮不标注时间', () => {
@@ -80,7 +86,7 @@ test('只在变化前保持 2.5 秒，显示结果后立即结束，按钮不标
 for (const elapsed of [500, 1500, 2499]) test('在第 ' + elapsed + ' 毫秒取消后恢复当前视图，旧回调不会覆盖新场景', () => {
   const f = fixture(); f.replay(); f.advance(elapsed); f.cancelReplay();
   assert.deepEqual(f.draws.at(-1).state, f.current);
-  assert.equal(f.body.classList.contains('replay-active'), false);
+  assert.equal(f.$('graph-stage').classList.contains('replaying'), false);
   assert.equal(f.panel.classList.contains('file-flowing'), false);
   assert.equal(f.$('replay-status').hidden, true);
   const count = f.draws.length; f.advance(20000);
@@ -113,11 +119,36 @@ test('后台延迟回调恢复时直接显示到期结果，不补等也不增�
   assert.equal(f.timers.size, 0); assert.deepEqual(f.current, f.saved);
 });
 
-test('协作者回放使用协作者快照，缺少成功结果时不启动', () => {
+test('协作者回放使用协作者快照，缺少结果或 reset 后禁用重播', () => {
   const f = fixture({ collaborator: true }); f.replay();
   assert.deepEqual(f.draws.at(-1).state, f.result.graphBefore);
   f.advance(2500); assert.deepEqual(f.draws.at(-1).state, f.result.graphAfter);
   f.cancelReplay(); assert.deepEqual(f.draws.at(-1).state, f.current);
-  f.context.lastResult = null; const count = f.draws.length; f.replay();
+  f.controller.reset();
+  assert.equal(f.$('replay').disabled, true);
+  const count = f.draws.length; f.replay();
   assert.equal(f.draws.length, count); assert.equal(f.timers.size, 0);
+});
+
+test('git pull fetch 完成后整合抛错时，仍支持记录并重播拉取变化', () => {
+  const sim = new Simulator('basic');
+  sim.editFile('docs', '本地同名文件\n');
+  assert.equal(sim.execute('git add .').ok, true);
+  assert.equal(sim.execute('git commit -m "本地添加 docs 文件"').ok, true);
+  const draft = new RemoteWorkspace('main', sim.state.remote.commits[sim.state.remote.branches.main], sim.state.remote);
+  draft.editFile('docs/guide.txt', '协作者添加目录文件\n');
+  assert.equal(draft.execute(sim, 'git add .').ok, true);
+  assert.equal(draft.execute(sim, 'git commit -m "协作者添加 docs/guide.txt"').ok, true);
+  assert.equal(draft.execute(sim, 'git push').ok, true);
+  const pullResult = sim.execute('git pull');
+  assert.equal(pullResult.ok, false);
+  assert.equal(pullResult.fetchCompleted, true);
+  assert.notEqual(pullResult.after.tracking.main, pullResult.before.tracking.main);
+
+  const f = fixture({ initialResult: pullResult });
+  assert.equal(f.$('replay').disabled, false);
+  f.replay();
+  assert.deepEqual(f.draws[0].state, pullResult.before);
+  f.advance(2500);
+  assert.deepEqual(f.draws[1].state, pullResult.after);
 });

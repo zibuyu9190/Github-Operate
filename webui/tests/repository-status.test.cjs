@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { Simulator } = require('../simulator.js');
-const { repositorySummary, StatusView } = require('../graph-viewer.js').RepositoryBrowser;
+const { repositorySummary, StatusView } = require('../repo-status.js');
 
 function run(sim, command) { const result = sim.execute(command); assert.equal(result.ok, true, result.output); return result; }
 function commit(sim, path, text) { sim.editFile(path, text); run(sim, 'git add .'); run(sim, 'git commit -m "更新文件"'); }
@@ -107,15 +107,20 @@ test('常驻状态明确标记本地仓库，Stash 点击只填命令，长分�
   assert.match(f.view.sync.textContent, /无法计算/);
 });
 
-test('协作者定位高亮支持重复点击且不改变仓库，减少动画设置会取消正在播放的高亮', () => {
+test('状态栏随三个身份更新标签并拒绝未知身份', () => {
   const f = fixture(), sim = new Simulator(), before = sim.snapshot();
-  const old = global.matchMedia; let reduced = false; global.matchMedia = () => ({ matches: reduced });
-  try {
-    f.view.update(sim.state); f.view.highlightCollaborator();
-    assert.equal(f.animations.length, 1);
-    f.view.highlightCollaborator(); assert.equal(f.animations[0].cancelled, true); assert.equal(f.animations.length, 2);
-    reduced = true; f.view.highlightCollaborator();
-    assert.equal(f.animations[1].cancelled, true); assert.equal(f.animations.length, 2);
-    assert.deepEqual(sim.snapshot(), before);
-  } finally { global.matchMedia = old; }
+  sim.execute('git stash');
+  f.view.update(sim.state, 'remote');
+  assert.equal(f.view.label.textContent, '协作者本地仓库');
+  assert.equal(f.view.root.attributes['aria-label'], '协作者本地仓库状态');
+  assert.match(f.view.stash.textContent, /^协作者 Stash：\d+$/);
+  f.view.update(sim.state, 'integrator');
+  assert.equal(f.view.label.textContent, '合并负责人本地仓库');
+  assert.equal(f.view.root.attributes['aria-label'], '合并负责人本地仓库状态');
+  assert.match(f.view.stash.textContent, /^合并负责人 Stash：\d+$/);
+  assert.throws(() => f.view.update(sim.state, '__proto__'), /未知的仓库身份/);
+  assert.equal(f.view.label.textContent, '合并负责人本地仓库');
+  f.view.update(sim.state, 'local');
+  assert.equal(f.view.label.textContent, '我的本地仓库');
+  assert.deepEqual(sim.snapshot().remote, before.remote);
 });

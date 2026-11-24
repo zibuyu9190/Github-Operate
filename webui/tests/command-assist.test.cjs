@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { complete, recommend, usage, Controller } = require('../command-assist.js');
 const { parse } = require('../commands.js');
-const { Simulator } = require('../simulator.js');
+const { Simulator, RemoteWorkspace } = require('../simulator.js');
 
 const context = sim => ({ state: sim.state, files: sim.fileStatus(), scene: sim.scene });
 const suggestions = (sim, text, caret = text.length) => complete(text, caret, context(sim));
@@ -87,6 +87,57 @@ test('推荐随编辑、暂存、再次编辑、提交和远程状态变化', ()
   run(sim, 'git fetch');
   assert.ok(commands(sim).includes('git pull --no-rebase origin main'));
   assert.ok(!commands(sim).includes('git push'));
+});
+
+test('合并负责人按当前目标分支推荐先获取并同步上游，再合入已获取的功能分支', () => {
+  const sim = new Simulator();
+  const origin = sim.state.remote;
+  const integrator = new RemoteWorkspace('main', origin.commits[origin.branches.main], origin, 'integrator');
+  const snapshot = () => integrator.commandContext(sim);
+  const recommendations = () => recommend(snapshot());
+  const mergeCommands = () => recommendations().map(item => item.command).filter(command => command.startsWith('git merge '));
+  const integrate = command => {
+    const result = integrator.execute(sim, command);
+    assert.ok(result.ok && !result.conflict, result.output);
+    assert.equal(result.actor, 'integrator');
+  };
+
+  assert.match(usage('', snapshot()), /合并负责人.*fetch.*push/);
+  assert.match(usage('git commit', snapshot()), /合并负责人.*git push/);
+  run(sim, 'git switch -c dev');
+  run(sim, 'git push -u origin dev');
+  run(sim, 'git switch -c release');
+  run(sim, 'git push -u origin release');
+  integrate('git fetch origin');
+  integrate('git switch release');
+  run(sim, 'git switch -c feature-a');
+  sim.editFile('a.txt', '功能 A\n');
+  run(sim, 'git add a.txt');
+  run(sim, 'git commit -m "功能 A"');
+  run(sim, 'git push -u origin feature-a');
+  run(sim, 'git branch 未发布分支');
+  run(sim, 'git switch release');
+  sim.editFile('readme-release.txt', '发布说明\n');
+  run(sim, 'git add readme-release.txt');
+  run(sim, 'git commit -m "更新发布说明"');
+  run(sim, 'git push');
+
+  assert.equal(recommendations()[0].command, 'git fetch origin');
+  assert.deepEqual(mergeCommands(), []);
+  integrate('git fetch origin');
+  assert.deepEqual(mergeCommands(), ['git merge origin/release']);
+  integrate('git merge origin/release');
+  const before = snapshot();
+  assert.deepEqual(mergeCommands(), ['git merge origin/feature-a']);
+  assert.match(recommendations()[0].description, /当前分支 release/);
+  assert.ok(!recommendations().some(item => item.command === 'git switch dev'));
+  assert.deepEqual(snapshot(), before);
+  integrate('git switch --detach');
+  assert.deepEqual(mergeCommands(), []);
+  integrate('git switch release');
+  integrate('git merge origin/feature-a');
+  assert.deepEqual(mergeCommands(), []);
+  assert.ok(recommendations().some(item => item.command === 'git push'));
 });
 
 test('冲突建议遵循先解决、再暂存、后继续，支持中止与分离 HEAD', () => {

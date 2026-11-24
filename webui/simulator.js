@@ -3,6 +3,11 @@
   const Commands = typeof module !== 'undefined' && module.exports ? require('./commands.js') : root.GitCommands;
   const clone = value => JSON.parse(JSON.stringify(value));
   const own = (map, key) => Object.prototype.hasOwnProperty.call(map, key);
+  const ACTORS = {
+    local: { button: '我的本地', owner: '我的', terminal: '我的本地' },
+    remote: { button: '模拟协作者', owner: '协作者', terminal: '协作者本地' },
+    integrator: { button: '合并负责人', owner: '合并负责人', terminal: '合并负责人' }
+  };
   const value = (map, key) => own(map, key) ? map[key] : undefined;
   const keys = (...maps) => [...new Set(maps.flatMap(map => Object.keys(map)))].sort();
   const same = (a, b) => keys(a, b).every(path => value(a, path) === value(b, path));
@@ -138,9 +143,12 @@
     return text.replace(/\r\n/g, '\n');
   }
 
-  /** 协作者是独立的多分支仓库；工作区、暂存区、stash 和 HEAD 随同一套命令语义变化。 */
+  /** 每个辅助身份拥有独立的多分支仓库，只有推送会更新共享远程。 */
   class RemoteWorkspace {
-    constructor(branch, commit, remote = null) {
+    constructor(branch, commit, remote = null, actor = 'remote') {
+      if (actor === 'local' || !own(ACTORS, actor)) throw new TypeError('无效的辅助仓库身份。');
+      this.actor = actor;
+      this.owner = ACTORS[actor].owner;
       this.branch = branch; this.baseId = commit.id; this.base = clone(commit.tree);
       this.work = clone(commit.tree); this.index = clone(commit.tree);
       // 只在建立协作者仓库时复制远程；之后必须 fetch，不能通过查看或切分支偷取新历史。
@@ -155,18 +163,8 @@
     }
     deleteFile(path) {
       validPath(path);
-      if (!own(this.work, path)) throw new Error('协作者工作区中没有这个文件。');
+      if (!own(this.work, path)) throw new Error(this.owner + '工作区中没有这个文件。');
       delete this.work[path];
-    }
-    stage(paths) {
-      const all = pathsWithConflicts(this.pending, this.base, this.index, this.work);
-      const targets = paths === '.' ? all : paths;
-      if (!Array.isArray(targets) || targets.some(path => !all.includes(path))) throw new Error('请选择存在的文件或待暂存的删除。');
-      for (const path of targets) {
-        put(this.index, path, value(this.work, path));
-        if (this.pending) this.pending.unresolved = this.pending.unresolved.filter(item => item !== path);
-      }
-      if (this.pending?.type === 'stash' && !this.pending.unresolved.length) this.pending = null;
     }
     fileStatus() {
       return describeFiles(this.base, this.index, this.work, this.pending);
@@ -177,7 +175,7 @@
       const repository = Object.create(Simulator.prototype);
       const commits = clone(this.commits), objects = { ...sim.state.remote.commits, ...commits };
       // 构造器只接收起点；补齐该起点的父链，不能悄悄导入远程后来的新提交。
-      const visit = id => { if (!objects[id]) throw new Error('协作者提交历史不完整，请重新载入远程。'); commits[id] = clone(objects[id]); objects[id].parents.forEach(parent => { if (!own(commits, parent)) visit(parent); }); };
+      const visit = id => { if (!objects[id]) throw new Error(this.owner + '提交历史不完整，请重新载入远程。'); commits[id] = clone(objects[id]); objects[id].parents.forEach(parent => { if (!own(commits, parent)) visit(parent); }); };
       visit(this.baseId); Object.values(this.tracking).forEach(visit);
       repository.state = {
         commits, branches: clone(this.branches),
@@ -192,12 +190,12 @@
       const repository = this.commandRepository(sim);
       const upstream = this.upstreams[this.branch], destination = upstream || this.branch;
       const actual = sim.state.remote.branches[destination], local = repository.ancestors(this.baseId), remote = repository.ancestors(actual, sim.state.remote.commits);
-      return { mode: 'remote', state: repository.state, files: repository.fileStatus(), upstream, actual,
+      return { mode: this.actor, state: repository.state, files: repository.fileStatus(), upstream, actual,
         stale: Object.keys(sim.state.remote.branches).some(branch => this.tracking[branch] !== sim.state.remote.branches[branch]),
         ahead: [...local].filter(id => !remote.has(id)).length, behind: [...remote].filter(id => !local.has(id)).length };
     }
 
-    /** 只发布命令成功的阶段；协作者 commit 使用全局唯一编号，独立保存在自己的仓库。 */
+    /** 只发布命令成功的阶段；各身份使用全局唯一提交编号，各自保存本地提交。 */
     execute(sim, input) {
       const before = sim.snapshot();
       try {
@@ -215,12 +213,13 @@
           sim.state.nextId = repository.state.nextId;
         }
         if (command.name === 'push') sim.state.remote = clone(repository.state.remote);
-        return { ...result, actor: 'remote', branch: command.name === 'push' ? command.branch || this.upstreams[this.branch] || this.branch : this.branch, commitId: command.name === 'commit' ? this.baseId : undefined,
-          output: '模拟协作者 · 本地 ' + (this.branch || '分离 HEAD ' + this.baseId) + '\n' + result.output,
-          explanation: command.name === 'commit' ? '协作者已提交到自己的本地仓库，尚未推送。执行 git push 后才会更新共享远程；你的本地需 fetch / pull 获取。' : '此命令操作协作者仓库。' + result.explanation,
+        const label = ACTORS[this.actor].button;
+        return { ...result, actor: this.actor, branch: command.name === 'push' ? command.branch || this.upstreams[this.branch] || this.branch : this.branch, commitId: command.name === 'commit' ? this.baseId : undefined,
+          output: label + ' · 本地 ' + (this.branch || '分离 HEAD ' + this.baseId) + '\n' + result.output,
+          explanation: command.name === 'commit' ? this.owner + '已提交到自己的本地仓库，执行 git push 后才会更新共享远程；其他身份需 fetch / pull 获取。' : '此命令操作' + this.owner + '仓库。' + result.explanation,
           graphBefore: result.before, graphAfter: result.after, before, after: sim.snapshot() };
       } catch (error) {
-        return { ok: false, output: error.message, explanation: '命令未执行，本地仓库、虚拟远程和协作者草稿保持不变。', before, after: before };
+        return { ok: false, output: error.message, explanation: '命令未执行，仓库状态和草稿保持不变。', before, after: before };
       }
     }
   }
@@ -869,25 +868,6 @@
       return { output: source + ' → origin/' + destination + '：' + id, explanation: 'push 上传提交并移动远程分支，同时更新本地对应的远程跟踪引用。它不会自动合并远程分叉。' };
     }
 
-    /** 协作者直接在远程创建提交；全部输入先校验，草稿过期时拒绝覆盖新的远程历史。 */
-    commitRemote(branch, draft) {
-      try {
-        if (typeof branch !== 'string' || !own(this.state.remote.branches, branch)) throw new Error('请选择一个已存在的远程分支；本地新分支需先 push。');
-        const old = this.state.remote.branches[branch];
-        if (!draft || draft.baseId !== old) throw new Error('远程分支已更新，请重新载入远程文件后再编辑和提交。');
-        if (typeof draft.message !== 'string' || !draft.message.trim() || draft.message.length > 200) throw new Error('请填写提交说明，最多 200 个字符。');
-        if (!draft.tree || typeof draft.tree !== 'object' || Array.isArray(draft.tree) || ![Object.prototype, null].includes(Object.getPrototypeOf(draft.tree))) throw new Error('文件快照格式无效。');
-        const tree = {};
-        for (const [path, text] of Object.entries(draft.tree)) { validPath(path); tree[path] = normalizeFileText(text); }
-        checkTreePaths(tree);
-        const previous = this.state.remote.commits[old].tree;
-        if (same(previous, tree)) throw new Error('暂存区没有可提交的变化，请先编辑并暂存文件。');
-        const message = draft.message.trim(), id = this.newCommit(tree, [old], message, true);
-        this.state.remote.branches[branch] = id;
-        return { ok: true, commitId: id, branch, output: '虚拟远程 ' + branch + ' 新增 ' + id + '\n提交说明：' + message + '\n本次文件变更：\n' + treeDiff(previous, tree), explanation: '协作者已提交到远程 ' + branch + '。你的本地分支、文件、暂存区和 origin/' + branch + ' 尚未变化；fetch 下载更新，pull 再整合到本地。' };
-      } catch (error) { return { ok: false, output: error.message, explanation: '远程提交未创建，仓库与协作者草稿保持不变。' }; }
-    }
-
     /** 场景预置和快捷示例自动追加一行；协作者自由编辑通过独立仓库 commit 后再 push。 */
     simulateRemote(branch) {
       if (branch === undefined) branch = own(this.state.remote.branches, 'main') ? 'main' : Object.keys(this.state.remote.branches)[0];
@@ -909,57 +889,192 @@
       };
     }
 
-    /** 六个场景均从同一个小型文本仓库派生，场景预置不伪装成用户执行的命令。 */
+    /** 全部场景均从同一个小型文本仓库派生，场景预置不伪装成用户执行的命令。 */
     loadScene(scene) {
       if (!own(SCENES, scene)) throw new Error('未知练习场景。');
       this.scene = scene;
-      this.state = { commits: {}, branches: {}, tags: {}, head: { branch: 'main', id: null }, index: {}, work: {}, stashes: [], reflog: [], previousCheckout: null, pending: null, remote: { commits: {}, branches: {} }, tracking: {}, upstreams: { main: 'main' }, nextId: 0 };
-      const tree = { 'hello.txt': '你好，Git！\n这是一段问候。\n保留这一行作为共同上下文。\n学习从一次提交开始。\n', 'README.md': '# Git Playground\n\n在这里安心练习 Git。\n' };
-      const first = this.newCommit(tree, [], '初始化练习仓库');
-      this.state.branches.main = first; this.installTree(tree);
-      this.state.remote = { commits: clone(this.state.commits), branches: { main: first } }; this.state.tracking.main = first;
-      const save = (message, edit) => {
-        const next = clone(this.headTree()); edit(next);
-        const id = this.newCommit(next, [this.headId()], message); this.moveHead(id); this.installTree(next); return id;
+      this.state = {
+        commits: {},
+        branches: {},
+        tags: {},
+        head: { branch: 'main', id: null },
+        index: {},
+        work: {},
+        stashes: [],
+        reflog: [],
+        previousCheckout: null,
+        pending: null,
+        remote: { commits: {}, branches: {} },
+        tracking: {},
+        upstreams: { main: 'main' },
+        nextId: 0
       };
+      const tree = {
+        'hello.txt': '你好，Git！\n这是一段问候。\n保留这一行作为共同上下文。\n学习从一次提交开始。\n',
+        'README.md': '# Git Playground\n\n在这里安心练习 Git。\n'
+      };
+      const first = this.newCommit(tree, [], '初始化练习仓库');
+      this.state.branches.main = first;
+      this.installTree(tree);
+      this.state.remote = { commits: clone(this.state.commits), branches: { main: first } };
+      this.state.tracking.main = first;
+
+      const save = (message, edit) => {
+        const next = clone(this.headTree());
+        edit(next);
+        const id = this.newCommit(next, [this.headId()], message);
+        this.moveHead(id);
+        this.installTree(next);
+        return id;
+      };
+
       if (scene === 'basic') {
-        save('补充 README 中的提交练习步骤', t => { t['README.md'] += '\n## 提交练习\n\n编辑 hello.txt，保存后执行 git add hello.txt，再执行 git commit。\n'; });
-        save('补充 README 中的远程同步说明', t => { t['README.md'] += '\n## 远程同步\n\nfetch 更新远程跟踪记录，pull 整合到当前分支，push 上传本地提交。\n'; });
+        save('补充 README 中的提交练习步骤', t => {
+          t['README.md'] += '\n## 提交练习\n\n编辑 hello.txt，保存后执行 git add hello.txt，再执行 git commit。\n';
+        });
+        save('补充 README 中的远程同步说明', t => {
+          t['README.md'] += '\n## 远程同步\n\nfetch 更新远程跟踪记录，pull 整合到当前分支，push 上传本地提交。\n';
+        });
         // 基础场景预置完整历史并同步虚拟远程，避免起点就出现待推送提交或误算练习进度。
         const tip = this.headId();
         this.state.remote = { commits: clone(this.state.commits), branches: { main: tip } };
         this.state.tracking.main = tip;
       } else if (['branches', 'conflict', 'rebase'].includes(scene)) {
-        save('准备分支练习', t => { t['notes.txt'] = '学习分支与 HEAD\n'; });
+        save('准备分支练习', t => {
+          t['notes.txt'] = '学习分支与 HEAD\n';
+        });
         this.state.branches.bugFix = this.headId();
         this.state.head.branch = 'bugFix';
-        save('修复问候语', t => { t['hello.txt'] = t['hello.txt'].replace('你好，Git！', '你好，修复后的 Git！'); });
-        this.state.head.branch = 'main'; this.installTree(this.headTree());
-        save('主分支继续开发', t => {
-          if (scene === 'conflict') t['hello.txt'] = t['hello.txt'].replace('你好，Git！', '欢迎，主分支！');
-          else t['README.md'] += '\n主分支新增使用说明。\n';
+        save('修复问候语', t => {
+          t['hello.txt'] = t['hello.txt'].replace('你好，Git！', '你好，修复后的 Git！');
         });
-        if (scene === 'rebase') { this.state.head.branch = 'bugFix'; this.installTree(this.headTree()); }
+        this.state.head.branch = 'main';
+        this.installTree(this.headTree());
+        save('主分支继续开发', t => {
+          if (scene === 'conflict') {
+            t['hello.txt'] = t['hello.txt'].replace('你好，Git！', '欢迎，主分支！');
+          } else {
+            t['README.md'] += '\n主分支新增使用说明。\n';
+          }
+        });
+        if (scene === 'rebase') {
+          this.state.head.branch = 'bugFix';
+          this.installTree(this.headTree());
+        }
       } else if (scene === 'reset') {
-        save('增加第二版问候', t => { t['hello.txt'] += '第二版内容\n'; });
-        save('增加第三版问候', t => { t['hello.txt'] += '第三版内容\n'; });
+        save('增加第二版问候', t => {
+          t['hello.txt'] += '第二版内容\n';
+        });
+        save('增加第三版问候', t => {
+          t['hello.txt'] += '第三版内容\n';
+        });
       } else if (scene === 'remote') {
-        save('本地：新增学习记录', t => { t['notes.txt'] = '这是本地的提交。\n'; });
+        save('本地：新增学习记录', t => {
+          t['notes.txt'] = '这是本地的提交。\n';
+        });
         this.simulateRemote();
+      } else if (scene === 'stash') {
+        const tip = save('准备功能开发基线', t => {
+          t['notes.txt'] = '功能待办\n';
+        });
+        this.state.remote = { commits: clone(this.state.commits), branches: { main: tip } };
+        this.state.tracking.main = tip;
+        this.state.branches.feature = tip;
+        this.state.head = { branch: 'feature', id: null };
+        this.installTree(this.headTree());
+        this.state.index['notes.txt'] = '功能待办\n已暂存的功能草稿\n';
+        this.state.work['notes.txt'] = '功能待办\n已暂存的功能草稿\n';
+        this.state.work['hello.txt'] += 'feature 未完成的改动\n';
+        this.state.work['draft.txt'] = '临时开发笔记\n';
+      } else if (scene === 'rescue') {
+        const v1 = save('发布 1.0 稳定版', t => {
+          t['release.txt'] = '版本 1.0\n';
+        });
+        this.state.tags['v1.0'] = { id: v1, message: '初始稳定版' };
+        this.state.branches.experiment = v1;
+        this.state.head.branch = 'experiment';
+        this.installTree(this.headTree());
+        save('添加实验功能（暂不发布）', t => {
+          t['wip.txt'] = '实验中的半成品\n';
+        });
+        save('修复线上问候拼写', t => {
+          t['hello.txt'] = t['hello.txt'].replace('你好，Git！', '你好，Git 1.0！');
+        });
+        this.state.head.branch = 'main';
+        this.installTree(this.headTree());
+        const mainTip = save('记录本周迭代日志', t => {
+          t['notes.txt'] = '本周迭代记录\n';
+        });
+        this.state.remote = { commits: clone(this.state.commits), branches: { main: mainTip } };
+        this.state.tracking.main = mainTip;
+      } else if (scene === 'collab') {
+        const tip = save('初始化团队协作仓库', t => {
+          t['team.txt'] = '团队协作项目\n';
+        });
+        this.state.remote = { commits: clone(this.state.commits), branches: { main: tip } };
+        this.state.tracking.main = tip;
       }
       this.state.reflog = [{ id: this.headId(), message: '练习场景起点' }];
     }
   }
 
   const SCENES = {
-    basic: { title: '基础提交', subtitle: '让一次改动，成为一个提交。', hint: 'main 已预置 3 次提交。先编辑 hello.txt 并保存，再依次执行 add 和 commit，观察新节点。', commands: ['git status', 'git add hello.txt', 'git commit -m "第一次修改"', 'git log --oneline'] },
-    branches: { title: '分支与合并', subtitle: '两个分支，如何汇成一条历史？', hint: 'main 和 bugFix 已经分叉，合并它们，观察双亲提交。', commands: ['git branch', 'git merge bugFix', 'git switch bugFix', 'git switch main'] },
-    conflict: { title: '合并冲突', subtitle: '同一行有两种答案，由你决定。', hint: '执行 merge 后，编辑 hello.txt 的冲突标记，add 并继续。', commands: ['git merge bugFix', 'git add hello.txt', 'git merge --continue', 'git merge --abort'] },
-    rebase: { title: '变基练习', subtitle: '把你的改动，搬到新的起点。', hint: '当前位于 bugFix。把它变基到 main，观察旧、新提交的区别。', commands: ['git rebase main', 'git log --oneline --graph --all', 'git rebase --continue', 'git rebase --abort'] },
-    reset: { title: 'Reset 对比', subtitle: '同样退一步，三个区域各不相同。', hint: '已有三次提交。分别重置场景，试试 soft、mixed、hard。', commands: ['git reset --soft HEAD~1', 'git reset --mixed HEAD~1', 'git reset --hard HEAD~1', 'git revert HEAD'] },
-    remote: { title: '远程协作', subtitle: '看清本地、远程与中间的那条线。', hint: '本地和远程各有一个新提交。先 push 看拒绝原因，再 fetch、pull、push。', commands: ['git push', 'git fetch', 'git pull --no-rebase origin main', 'git push'] }
+    basic: {
+      title: '基础提交',
+      subtitle: '让一次改动，成为一个提交。',
+      hint: 'main 已预置 3 次提交。先编辑 hello.txt 并保存，再依次执行 add 和 commit，观察新节点。',
+      commands: ['git status', 'git add hello.txt', 'git commit -m "第一次修改"', 'git log --oneline']
+    },
+    branches: {
+      title: '分支与合并',
+      subtitle: '两个分支，如何汇成一条历史？',
+      hint: 'main 和 bugFix 已经分叉，合并它们，观察双亲提交。',
+      commands: ['git branch', 'git merge bugFix', 'git switch bugFix', 'git switch main']
+    },
+    conflict: {
+      title: '合并冲突',
+      subtitle: '同一行有两种答案，由你决定。',
+      hint: '执行 merge 后，编辑 hello.txt 的冲突标记，add 并继续。',
+      commands: ['git merge bugFix', 'git add hello.txt', 'git merge --continue', 'git merge --abort']
+    },
+    rebase: {
+      title: '变基练习',
+      subtitle: '把你的改动，搬到新的起点。',
+      hint: '当前位于 bugFix。把它变基到 main，观察旧、新提交的区别。',
+      commands: ['git rebase main', 'git log --oneline --graph --all', 'git rebase --continue', 'git rebase --abort']
+    },
+    reset: {
+      title: 'Reset 对比',
+      subtitle: '同样退一步，三个区域各不相同。',
+      hint: '已有三次提交。分别重置场景，试试 soft、mixed、hard。',
+      commands: ['git reset --soft HEAD~1', 'git reset --mixed HEAD~1', 'git reset --hard HEAD~1', 'git revert HEAD']
+    },
+    remote: {
+      title: '远程协作',
+      subtitle: '看清本地、远程与中间的那条线。',
+      hint: '本地和远程各有一个新提交。先 push 看拒绝原因，再 fetch、pull、push。',
+      commands: ['git push', 'git fetch', 'git pull --no-rebase origin main', 'git push']
+    },
+    stash: {
+      title: '暂存与修订',
+      subtitle: '临时保存手头改动，切分支修复后再恢复。',
+      hint: '当前位于 feature 且有未提交改动。先用 stash 临时保存，切到 main 提交并 amend 修订，再回 feature 恢复；或切换方案练习 restore。',
+      commands: ['git status', 'git stash push -u -m "开发中的草稿"', 'git switch main', 'git stash pop']
+    },
+    rescue: {
+      title: '摘取与救援',
+      subtitle: '精准摘取单个提交，安全撤回或用 reflog 找回历史。',
+      hint: '当前位于 main，experiment 上有两个提交（只需最后一个修复）。可尝试 cherry-pick 摘取并打 tag，或练习 revert 与 reflog 救援。',
+      commands: ['git show experiment', 'git cherry-pick experiment', 'git revert HEAD', 'git reflog']
+    },
+    collab: {
+      title: '双人协作',
+      subtitle: '切换协作者与本地双仓库，演练并发推送冲突。',
+      hint: '用顶部“模拟协作者”与“我的本地”分别修改 hello.txt、commit 并 push，再通过 fetch 与 pull 解决并发冲突。',
+      commands: ['git status', 'git fetch origin', 'git pull --no-rebase origin main', 'git push']
+    }
   };
-  const api = { Simulator, RemoteWorkspace, SCENES, mergeText, hasConflictMarkers, edits, same };
+  const api = { Simulator, RemoteWorkspace, SCENES, ACTORS, mergeText, hasConflictMarkers, edits, same };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.GitSimulator = api;
 })(globalThis);

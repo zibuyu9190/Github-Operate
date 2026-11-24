@@ -1,10 +1,10 @@
 (function (root) {
   'use strict';
   const NS = 'http://www.w3.org/2000/svg';
-  const NODE_RADIUS = 19, LABEL_HEIGHT = 25, LABEL_GAP = 52;
+  const NODE_RADIUS = 18, LABEL_HEIGHT = 24, LABEL_GAP = 48;
   const EDGE_CLEARANCE = 32;
-  const DEFAULT_ZOOM = 1.15;
-  const READABLE_SCALE = .85;
+  const DEFAULT_ZOOM = .95;
+  const MIN_ZOOM = .6;
   const labelWidth = text => Math.max(54, [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 255 ? 11 : 6.8), 18));
   // 本地分支预留星号宽度，切换 HEAD 只改变标识，不推动后续提交。
   const referenceWidth = ref => labelWidth(ref.text + (ref.key.startsWith('local:') && !ref.active ? '*' : ''));
@@ -85,17 +85,17 @@
     constructor(svg, onSelect) {
       this.svg = svg;
       this.onSelect = onSelect;
-      this.zoom = DEFAULT_ZOOM;
-      this.fitted = false;
       this.previous = new Map();
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      this.setZoom(DEFAULT_ZOOM);
     }
 
     references(state) {
       const refs = [
         ...Object.entries(state.tags || {}).map(([name, tag]) => ({ key: 'tag:' + name, text: 'tag: ' + name, id: tag.id, color: '#fde68a' })),
-        ...Object.entries(state.branches).map(([name, id]) => ({ key: 'local:' + name, text: name + (state.head.branch === name ? '*' : ''), id, active: state.head.branch === name, color: '#3988b6' })),
-        ...Object.entries(state.tracking).map(([name, id]) => ({ key: 'tracking:' + name, text: 'origin/' + name, id, color: '#b4d3e1', small: true })),
-        ...Object.entries(state.remote.branches).filter(([name, id]) => state.tracking[name] !== id).map(([name, id]) => ({ key: 'remote:' + name, text: '远端/' + name, id, color: '#b5b0ed', small: true }))
+        ...Object.entries(state.branches).map(([name, id]) => ({ key: 'local:' + name, text: name + (state.head.branch === name ? '*' : ''), id, active: state.head.branch === name, color: '#bae6fd' })),
+        ...Object.entries(state.tracking).map(([name, id]) => ({ key: 'tracking:' + name, text: 'origin/' + name, id, color: '#e2e8f0', small: true })),
+        ...Object.entries(state.remote.branches).filter(([name, id]) => state.tracking[name] !== id).map(([name, id]) => ({ key: 'remote:' + name, text: '远端/' + name, id, color: '#ddd6fe', small: true }))
       ];
       if (!state.head.branch) refs.unshift({ key: 'head', text: 'HEAD*', id: state.head.id, active: true });
       return refs;
@@ -239,11 +239,10 @@
     draw(state, options = {}) {
       this.state = state;
       const svg = this.svg, layout = this.layout(state), positions = layout.positions;
-      this.size = { width: layout.width, height: layout.height };
       svg.replaceChildren(); svg.setAttribute('viewBox', '0 0 ' + layout.width + ' ' + layout.height);
       const title = element('title', {}, 'Git 提交图。旧提交在左，新提交在右；箭头向左指向父提交，亮绿色标签表示当前分支。'); svg.append(title);
       const defs = element('defs');
-      for (const [id, color] of [['parent-arrow', '#294a60'], ['label-arrow', '#fff']]) {
+      for (const [id, color] of [['parent-arrow', '#334155'], ['label-arrow', '#64748b']]) {
         const marker = element('marker', { id, markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: 'auto', markerUnits: 'userSpaceOnUse' });
         marker.append(element('path', { d: 'M0,0 L8,4 L0,8 Z', fill: color })); defs.append(marker);
       }
@@ -254,7 +253,7 @@
       [...Object.values(state.branches), ...Object.values(state.tracking), ...Object.values(state.remote.branches), ...Object.values(state.tags || {}).map(tag => tag.id), head].forEach(visit);
       for (const route of layout.edges) {
         const edge = element('path', { class: 'commit-edge', d: route.path, 'marker-end': 'url(#parent-arrow)' });
-        if (!reachable.has(route.commit)) { edge.setAttribute('opacity', '.28'); edge.setAttribute('stroke-dasharray', '5 4'); }
+        if (!reachable.has(route.commit)) { edge.setAttribute('opacity', '.32'); edge.setAttribute('stroke-dasharray', '5 4'); }
         if (!Object.hasOwn(state.commits, route.commit)) edge.setAttribute('stroke-dasharray', '5 4');
         svg.append(edge);
       }
@@ -263,9 +262,9 @@
         const orphan = !reachable.has(commit.id), active = commit.id === head;
         const group = element('g', { class: 'commit-node' + (orphan ? ' orphan' : '') + (!local ? ' remote-only' : '') + (options.animate && !this.previous.has(commit.id) ? ' new-node' : ''), transform: `translate(${point.x} ${point.y})`, tabindex: 0, role: 'button', 'aria-label': commit.id + ' ' + commit.message + (!local ? '，仅远程拥有' : '') });
         group.append(element('title', {}, commit.id + ' · ' + commit.message + (orphan ? '（失去引用的历史）' : '')));
-        group.append(element('circle', { r: NODE_RADIUS, fill: active ? '#7bffc4' : orphan ? '#94c3d7' : !local ? '#b0b1ed' : '#55b5ba' }));
-        group.append(element('text', { 'text-anchor': 'middle', dy: 5 }, commit.id));
-        group.append(element('text', { class: 'node-hash', y: -34, 'text-anchor': 'middle' }, !local ? '仅在远程' : ''));
+        group.append(element('circle', { r: NODE_RADIUS, fill: active ? '#34d399' : orphan ? '#cbd5e1' : !local ? '#c4b5fd' : '#38bdf8' }));
+        group.append(element('text', { 'text-anchor': 'middle', dy: 4 }, commit.id));
+        group.append(element('text', { class: 'node-hash', y: -28, 'text-anchor': 'middle' }, !local ? '仅在远程' : ''));
         const select = () => {
           svg.querySelectorAll('.node-selected').forEach(node => node.classList.remove('node-selected'));
           group.classList.add('node-selected'); this.onSelect(commit, !local);
@@ -286,9 +285,9 @@
         const startY = above ? LABEL_HEIGHT - 5 : 5, bendY = point.y - y + (above ? -32 : 32);
         const innerY = above ? height + 12 : -12;
         group.append(element('path', { class: 'branch-pointer', d: `M 0 ${startY} L -12 ${innerY} Q -12 ${bendY} ${endX} ${endY}`, 'marker-end': 'url(#label-arrow)' }));
-        group.append(element('rect', { width, height: LABEL_HEIGHT, rx: 7, fill: ref.active ? '#00fa8f' : ref.color, 'stroke-dasharray': ref.small ? '4 2' : 'none' }));
-        group.append(element('text', { x: width / 2, y: 17, 'text-anchor': 'middle' }, ref.text));
-        if (ref.active) group.append(element('text', { class: 'head-caption', x: width / 2, y: 39, 'text-anchor': 'middle' }, state.head.branch ? 'HEAD' : '分离状态'));
+        group.append(element('rect', { width, height: LABEL_HEIGHT, rx: 6, fill: ref.active ? '#34d399' : ref.color, 'stroke-dasharray': ref.small ? '4 2' : 'none' }));
+        group.append(element('text', { x: width / 2, y: 16, 'text-anchor': 'middle' }, ref.text));
+        if (ref.active) group.append(element('text', { class: 'head-caption', x: width / 2, y: 37, 'text-anchor': 'middle' }, state.head.branch ? 'HEAD' : '分离状态'));
         svg.append(group); tagPositions.set(ref.key, { x, y, id: ref.id, active: ref.active });
         if (changed) {
           // 慢速回放用线性淡入配合持续高亮，避免 ease-out 在开头就显得已经结束。
@@ -296,34 +295,21 @@
         }
       }
       this.previous = positions; this.previousTags = tagPositions;
-      this.resize();
     }
 
-    resize() {
-      if (!this.size) return;
-      const parent = this.svg.parentElement, width = parent.clientWidth || 600, height = parent.clientHeight || 240;
-      // 默认保留可读比例，显式适应时才缩至整图可见；两个轴始终采用相同的比例。
-      const fit = Math.min(width / this.size.width, height / this.size.height);
-      const baseline = Math.max(fit, READABLE_SCALE), scale = this.fitted ? fit : baseline * this.zoom;
-      if (this.fitted) this.zoom = fit / baseline;
-      const graphWidth = this.size.width * scale, graphHeight = this.size.height * scale;
-      const style = this.svg.style;
-      style.minWidth = '0';
-      style.width = graphWidth + 'px';
-      style.height = graphHeight + 'px';
-      style.marginLeft = Math.max(0, (width - graphWidth) / 2) + 'px';
-      style.marginTop = Math.max(0, (height - graphHeight) / 2) + 'px';
-    }
+    get canZoomIn() { return this.zoom < 1; }
+    get canZoomOut() { return this.zoom > MIN_ZOOM; }
 
+    /** 以当前画布完整容纳整图为 100%，SVG 随容器变化自动等比适应。 */
     setZoom(value) {
       this.fitted = false;
-      this.zoom = Math.max(.6, Math.min(2.5, value));
-      this.resize();
+      this.zoom = Math.max(MIN_ZOOM, Math.min(1, value));
+      this.svg.style.width = this.svg.style.height = this.zoom * 100 + '%';
     }
 
     fit() {
+      this.setZoom(1);
       this.fitted = true;
-      this.resize();
     }
   }
   CommitGraph.DEFAULT_ZOOM = DEFAULT_ZOOM;

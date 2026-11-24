@@ -50,25 +50,22 @@ test('基础历史从左向右展开，节点和标签文字保持正向，所�
   assert.ok(view.all().some(element => element.textContent === 'HEAD'));
 });
 
-test('主面板、放大弹窗和窄屏按图形尺寸等比缩放，适应模式容纳完整画布', () => {
+test('默认等比适应容器，缩放始终限制在整图可见的范围', () => {
   const view = renderer(false), sim = new Simulator('branches'); view.graph.draw(sim.state);
-  const layout = view.graph.layout(sim.state);
-  const size = () => [parseFloat(view.svg.style.width), parseFloat(view.svg.style.height)];
-  for (const [width, height] of [[900, 395], [1198, 561], [340, 240]]) {
-    view.svg.parentElement = { clientWidth: width, clientHeight: height };
-    view.graph.setZoom(1);
-    const base = size();
-    assert.ok(Math.abs(base[0] / layout.width - base[1] / layout.height) < 1e-9);
-    assert.ok(base[0] / layout.width >= .85 - 1e-9);
-    view.graph.setZoom(2);
-    assert.deepEqual(size(), base.map(value => value * 2));
-    view.graph.setZoom(.6);
-    assert.ok(size().every((value, axis) => Math.abs(value - base[axis] * .6) < 1e-9));
-    view.graph.fit();
-    const fitted = size();
-    assert.ok(Math.abs(Math.max(fitted[0] / width, fitted[1] / height) - 1) < 1e-9);
-    assert.ok(Math.abs(fitted[0] / layout.width - fitted[1] / layout.height) < 1e-9);
-  }
+  const size = () => [view.svg.style.width, view.svg.style.height];
+  assert.equal(view.svg.attrs.preserveAspectRatio, 'xMidYMid meet');
+  assert.deepEqual(size(), ['95%', '95%']);
+  view.graph.setZoom(2.5);
+  assert.deepEqual(size(), ['100%', '100%']);
+  assert.equal(view.graph.canZoomIn, false);
+  view.graph.setZoom(0.2);
+  assert.deepEqual(size(), ['60%', '60%']);
+  assert.equal(view.graph.canZoomOut, false);
+  view.graph.fit();
+  view.graph.draw(sim.state);
+  assert.deepEqual(size(), ['100%', '100%']);
+  assert.equal(view.graph.fitted, true);
+  assert.equal(view.graph.canZoomOut, true);
 });
 
 for (const reduced of [false, true]) test('分支移动在减少动画偏好为 ' + reduced + ' 时遵循动画策略', () => {
@@ -178,7 +175,7 @@ test('一条分支再次分叉时避开同层已有提交，多分支节点不�
   }
 });
 
-test('六场景及变基、远程合并后：每条边仍指向真实父提交，重新绘图与 fetch 不改变已有通道', () => {
+test('九场景及变基、远程合并后：每条边仍指向真实父提交，重新绘图与 fetch 不改变已有通道', () => {
   for (const scene of Object.keys(SCENES)) {
     const view = renderer(false), sim = new Simulator(scene);
     if (scene === 'branches') run(sim, 'git merge bugFix');
@@ -279,7 +276,7 @@ test('根提交挂 origin/main 且右侧分为三支：标签与提交线、其�
   run(sim, 'git fetch'); assertLabelsClear(view, sim.state);
 });
 
-test('六类场景和跨层合并：长名称、多层标签及 HEAD 说明均不被连线穿过', () => {
+test('九类场景和跨层合并：长名称、多层标签及 HEAD 说明均不被连线穿过', () => {
   const view = renderer(false);
   for (const scene of Object.keys(SCENES)) assertLabelsClear(view, new Simulator(scene).state);
   const sim = new Simulator('basic'); run(sim, 'git branch dev');

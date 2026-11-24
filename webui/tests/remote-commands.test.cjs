@@ -11,6 +11,18 @@ const run = (sim, draft, command) => {
 };
 const localState = sim => Object.fromEntries(Object.entries(sim.snapshot()).filter(([key]) => !['remote', 'nextId'].includes(key)));
 
+test('辅助仓库仅接受协作者和合并负责人身份', () => {
+  const sim = new Simulator(), origin = sim.state.remote, tip = origin.commits[origin.branches.main];
+  for (const actor of ['local', 'unknown', '__proto__']) {
+    assert.throws(() => new RemoteWorkspace('main', tip, origin, actor), {
+      name: 'TypeError', message: '无效的辅助仓库身份。'
+    });
+  }
+  assert.equal(workspace(sim).actor, 'remote');
+  const integrator = new RemoteWorkspace('main', tip, origin, 'integrator');
+  assert.equal(run(sim, integrator, 'git status').actor, 'integrator');
+});
+
 test('协作者选择删除处理冲突时，文件列表和推荐保留路径直到暂存', () => {
   const sim = new Simulator(), draft = workspace(sim);
   const command = command => run(sim, draft, command);

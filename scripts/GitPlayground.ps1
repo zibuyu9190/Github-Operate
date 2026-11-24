@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
 创建桌面快捷方式，按需启动 Git 图解实验室本地服务。
@@ -189,8 +189,12 @@ function Invoke-StaticRequest {
         '/graph.js' = @('graph.js', 'text/javascript; charset=utf-8')
         '/graph-viewer.js' = @('graph-viewer.js', 'text/javascript; charset=utf-8')
         '/graph-viewer.css' = @('graph-viewer.css', 'text/css; charset=utf-8')
+        '/repo-browser.js' = @('repo-browser.js', 'text/javascript; charset=utf-8')
+        '/repo-status.js' = @('repo-status.js', 'text/javascript; charset=utf-8')
         '/terminal-history.js' = @('terminal-history.js', 'text/javascript; charset=utf-8')
         '/terminal-history.css' = @('terminal-history.css', 'text/css; charset=utf-8')
+        '/replay.js' = @('replay.js', 'text/javascript; charset=utf-8')
+        '/help-manual.js' = @('help-manual.js', 'text/javascript; charset=utf-8')
         '/app.js' = @('app.js', 'text/javascript; charset=utf-8')
     }
     if (-not $assets.ContainsKey($requestPath)) {

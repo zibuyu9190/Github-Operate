@@ -61,8 +61,15 @@ test('界面只有一个复制按钮，跟随身份只复制当前窗口的全�
   f.context.actor = 'remote'; f.view.update(); assert.equal(f.view.feedback.textContent, '');
   await f.view.copyHistory(); assert.match(copied[1], /协作者本地/); assert.match(copied[1], /git fetch origin/);
   assert.ok(!copied[1].includes('$ git status'));
+  f.history.record(entry({ actor: 'integrator', command: 'git merge origin/dev' }));
+  f.context.actor = 'integrator'; f.view.update();
+  await f.view.copyHistory();
+  assert.match(copied[2], /复制范围：合并负责人/);
+  assert.match(copied[2], /\[3\].*合并负责人/);
+  assert.match(copied[2], /\$ git merge origin\/dev/);
+  assert.doesNotMatch(copied[2], /\$ git (?:fetch|status)/);
   f.history.clear(); f.view.reset(); assert.equal(f.view.button.disabled, true); assert.equal(f.view.feedback.textContent, '');
-  await f.view.copyHistory(); assert.equal(copied.length, 2);
+  await f.view.copyHistory(); assert.equal(copied.length, 3);
 });
 
 test('复制失败明确提示，切换身份或重置后不会出现上一轮异步成功提示', async () => {

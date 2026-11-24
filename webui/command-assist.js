@@ -1,7 +1,7 @@
 /* 补全和推荐只生成输入文本，不执行命令；同一数据逻辑可在 Node 中验证。 */
 (function (root) {
   'use strict';
-  const { hasConflictMarkers } = typeof module !== 'undefined' && module.exports ? require('./simulator.js') : root.GitSimulator;
+  const { ACTORS, hasConflictMarkers } = typeof module !== 'undefined' && module.exports ? require('./simulator.js') : root.GitSimulator;
   const catalog = {
     status: ['查看仓库与文件状态', 'status'],
     log: ['查看提交历史', 'log [--oneline] [--graph] [--all]'],
@@ -79,11 +79,11 @@
     const at = contextAt(input, Math.max(0, Math.min(input.length, caret)));
     if (!at) return [];
     const { active, prefix, before } = at, state = context.state;
-    const remote = context.mode === 'remote';
+    const owner = context.mode && context.mode !== 'local' ? ACTORS[context.mode]?.owner : null;
     let choices = [];
     const offer = (text, description, kind = '参数', edit = null) => choices.push({ text, description, kind, edit });
     const refs = (branchesOnly = false) => {
-      for (const name of Object.keys(state.branches)) offer(name, remote ? '协作者本地分支' : name === state.head.branch ? '当前本地分支' : '本地分支', '分支');
+      for (const name of Object.keys(state.branches)) offer(name, owner ? owner + '本地分支' : name === state.head.branch ? '当前本地分支' : '本地分支', '分支');
       if (branchesOnly) return;
       for (const name of Object.keys(state.tracking)) offer('origin/' + name, '本地远程跟踪引用', '引用');
       for (const name of Object.keys(state.tags || {})) offer(name, '本地版本标签', '标签');
@@ -222,7 +222,26 @@
       if (name === 'commit') return '协作者用法：git ' + catalog.commit[1] + ' · 保存到协作者本地，之后 git push 发布到共享远程';
       if (!Object.hasOwn(catalog, name)) return '协作者与我的本地支持相同命令；switch 切分支，commit 后需要 push';
     }
+    if (context.mode === 'integrator') {
+      if (name === 'commit') return '合并负责人用法：git ' + catalog.commit[1] + ' · 保存到本地仓库，之后 git push 发布到共享远程';
+      if (!Object.hasOwn(catalog, name)) return '合并负责人：先 fetch，再切到接收改动的分支，合入已发布的功能分支后 push';
+    }
     return Object.hasOwn(catalog, name) ? '用法：git ' + catalog[name][1] : '输入命令、参数或文件名，按 Tab 自动补全';
+  }
+
+  /** 当前检出的分支是合并目标。远程有新进度时先获取，目标落后时先合入其上游。 */
+  function recommendIntegration(state, current, upstream, add) {
+    const target = state.head.branch;
+    if (!target) return;
+    const tracked = state.tracking[upstream];
+    if (tracked && !ancestor(state, tracked, current)) {
+      add('git merge ' + quote('origin/' + upstream), '先将远程已有的进度合入 ' + target);
+      return;
+    }
+    for (const [branch, tip] of Object.entries(state.tracking)) {
+      if (branch === target || branch === upstream || !Object.hasOwn(state.commits, tip) || ancestor(state, tip, current)) continue;
+      add('git merge ' + quote('origin/' + branch), '确认后将 ' + branch + ' 合入当前分支 ' + target);
+    }
   }
 
   /** 推荐随快照变化，只建议下一步；有冲突标记时不催促用户暂存或继续。 */
@@ -252,17 +271,23 @@
       add('git status', '确认哪些改动已暂存、哪些仍在工作区');
     } else {
       const upstream = state.upstreams[state.head.branch], remote = state.tracking[upstream];
-      if (Object.keys(state.remote.branches).some(name => state.remote.branches[name] !== state.tracking[name])) add('git fetch origin', '远程有新变化，先更新本地 origin/* 引用');
-      if (remote && !ancestor(state, remote, current)) add('git pull --no-rebase origin ' + quote(upstream), '本地缺少远程历史，下载后合并');
-      if (['branches', 'conflict'].includes(scene) && state.branches.bugFix && !ancestor(state, state.branches.bugFix, current)) add('git merge bugFix', '把 bugFix 的改动合并到当前分支');
-      if (scene === 'rebase' && state.head.branch !== 'main' && !ancestor(state, state.branches.main, current)) add('git rebase main', '把当前分支的提交重放到 main 之上');
-      if (scene === 'reset' && state.commits[current]?.parents.length) add('git reset --soft HEAD~1', '只移动分支指针，观察改动保留在暂存区');
+      const stale = Object.keys(state.remote.branches).some(name => state.remote.branches[name] !== state.tracking[name]);
+      if (stale) add('git fetch origin', '远程有新变化，先更新本地 origin/* 引用');
+      if (context.mode === 'integrator') {
+        if (!stale) recommendIntegration(state, current, upstream, add);
+      } else {
+        if (remote && !ancestor(state, remote, current)) add('git pull --no-rebase origin ' + quote(upstream), '本地缺少远程历史，下载后合并');
+        if (['branches', 'conflict'].includes(scene) && state.branches.bugFix && !ancestor(state, state.branches.bugFix, current)) add('git merge bugFix', '把 bugFix 的改动合并到当前分支');
+        if (scene === 'rebase' && state.head.branch !== 'main' && !ancestor(state, state.branches.main, current)) add('git rebase main', '把当前分支的提交重放到 main 之上');
+        if (scene === 'rescue' && state.head.branch === 'main' && state.branches.experiment && !ancestor(state, state.branches.experiment, current) && state.commits[current]?.tree['hello.txt'] !== state.commits[state.branches.experiment]?.tree['hello.txt']) add('git cherry-pick experiment', '仅摘取 experiment 最新提交中的问候修复');
+        if (scene === 'reset' && state.commits[current]?.parents.length) add('git reset --soft HEAD~1', '只移动分支指针，观察改动保留在暂存区');
+      }
       if (remote && state.remote.branches[upstream] === remote && current !== remote && ancestor(state, remote, current)) add('git push', '本地有尚未推送的提交，同步到上游');
       else if (state.head.branch && !upstream) add('git push -u origin ' + quote(state.head.branch), '发布当前分支并设置上游');
       if (state.stashes.length) add('git stash pop', '恢复最近一份临时改动；冲突时记录会保留');
       add('git log --oneline --graph --all', '观察提交历史与分支指向');
       add('git status', '查看当前分支、文件和同步状态');
-      if (scene === 'basic' || context.mode === 'remote') add('git switch -c feature', '工作区干净，可以创建分支继续练习');
+      if (context.mode === 'remote' || (scene === 'basic' && context.mode !== 'integrator')) add('git switch -c feature', '工作区干净，可以创建分支继续练习');
     }
     return result.slice(0, 4);
   }

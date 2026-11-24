@@ -1,0 +1,51 @@
+name: Deploy Git Playground to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'webui/**'
+      - '!webui/tests/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare static site
+        run: |
+          mkdir -p _site
+          cp webui/*.html webui/*.css webui/*.js _site/
+          touch _site/.nojekyll
+          for asset in $(grep -oE '(href|src)="[^"]+\.(css|js)"' _site/index.html | sed -E 's/^[^"]+="([^"]+)"$/\1/'); do
+            test -f "_site/$asset" || { echo "Missing asset: $asset" >&2; exit 1; }
+          done
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

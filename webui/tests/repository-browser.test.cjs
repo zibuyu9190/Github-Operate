@@ -1,10 +1,19 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { Simulator, RemoteWorkspace, edits } = require('../simulator.js');
-const { Model, View, listEntries, fileStats, latestPathCommit, commitAge } = require('../graph-viewer.js').RepositoryBrowser;
+const { Model, View, listEntries, fileStats, latestPathCommit, commitAge } = require('../repo-browser.js');
 
 function run(sim, command) { const result = sim.execute(command); assert.equal(result.ok, true, result.output); return result; }
 function commit(sim, file, content) { sim.editFile(file, content); run(sim, 'git add .'); run(sim, 'git commit -m "更新 ' + file + '"'); }
+function remoteCommitPush(sim, branch, editsFn, message = '协作者更新') {
+  const tip = sim.state.remote.branches[branch];
+  const draft = new RemoteWorkspace(branch, sim.state.remote.commits[tip], sim.state.remote);
+  editsFn(draft);
+  const staged = draft.execute(sim, 'git add .'); assert.equal(staged.ok, true, staged.output);
+  const committed = draft.execute(sim, 'git commit -m "' + message + '"'); assert.equal(committed.ok, true, committed.output);
+  const pushed = draft.execute(sim, 'git push');
+  return { ...pushed, commit: sim.state.remote.commits[draft.baseId] };
+}
 
 test('目录按精确路径分段并优先列出文件夹，支持中文、空格和对象原型同名文件', () => {
   const tree = { 'src/deep/hello.txt': '你好\n', 'src/a.txt': 'a', 'src-old/b.txt': 'b', 'toString': '普通文本', '空 白.txt': '' };
@@ -26,7 +35,7 @@ test('默认展示远程实际提交，本地未提交编辑、暂存和协作�
   sim.editFile('hello.txt', '本地未提交\n'); run(sim, 'git add .');
   assert.equal(model.read(sim.state).tree['hello.txt'], original);
   model.selectSource('local', sim.state); assert.equal(model.read(sim.state).tree['hello.txt'], original);
-  const remote = sim.commitRemote('main', { baseId: sim.state.remote.branches.main, tree: { ...sim.headTree(), 'hello.txt': '协作者提交\n' }, message: '协作者更新' });
+  const remote = remoteCommitPush(sim, 'main', draft => draft.editFile('hello.txt', '协作者提交\n'), '协作者更新');
   assert.equal(remote.ok, true);
   model.selectSource('remote', sim.state); assert.equal(model.read(sim.state).tree['hello.txt'], '协作者提交\n');
   model.selectSource('tracking', sim.state); assert.equal(model.read(sim.state).tree['hello.txt'], original);
@@ -40,8 +49,7 @@ test('本地提交、push、远程协作者、fetch 与 pull 各自更新对应�
   assert.equal(Object.hasOwn(model.read(sim.state).tree, 'local.txt'), false);
   model.selectSource('local', sim.state); assert.equal(model.read(sim.state).tree['local.txt'], '我的提交\n');
   run(sim, 'git push'); model.selectSource('remote', sim.state); assert.equal(model.read(sim.state).tree['local.txt'], '我的提交\n');
-  const tip = sim.state.remote.branches.main;
-  assert.equal(sim.commitRemote('main', { baseId: tip, tree: { ...sim.state.remote.commits[tip].tree, 'remote.txt': '他人提交\n' }, message: '添加远程文件' }).ok, true);
+  assert.equal(remoteCommitPush(sim, 'main', draft => draft.editFile('remote.txt', '他人提交\n'), '添加远程文件').ok, true);
   model.selectSource('tracking', sim.state); assert.equal(Object.hasOwn(model.read(sim.state).tree, 'remote.txt'), false);
   run(sim, 'git fetch'); assert.equal(model.read(sim.state).tree['remote.txt'], '他人提交\n');
   model.selectSource('local', sim.state); assert.equal(Object.hasOwn(model.read(sim.state).tree, 'remote.txt'), false);
@@ -146,9 +154,14 @@ test('弹窗选择框按实际来源更新内容，空文件和无分支状态�
 });
 
 test('仓库浏览跟随身份与各自初始分支，隔离未推送提交并分别保留浏览位置', () => {
-  let actor = 'local', peer;
-  const f = fixture(sim => ({ actor, state: actor === 'remote' ? peer.commandContext(sim).state : sim.state }));
-  peer = new RemoteWorkspace('main', f.sim.state.remote.commits[f.sim.state.remote.branches.main], f.sim.state.remote);
+  let actor = 'local';
+  const otherWorkspaces = new Map();
+  const f = fixture(sim => ({ actor, state: otherWorkspaces.get(actor)?.commandContext(sim).state || sim.state }));
+  const origin = f.sim.state.remote, start = origin.commits[origin.branches.main];
+  const peer = new RemoteWorkspace('main', start, origin);
+  const integrator = new RemoteWorkspace('main', start, origin, 'integrator');
+  otherWorkspaces.set('remote', peer);
+  otherWorkspaces.set('integrator', integrator);
   run(f.sim, 'git switch -c mine'); commit(f.sim, 'mine.txt', '我的未推送提交\n');
   const executePeer = command => { const result = peer.execute(f.sim, command); assert.equal(result.ok, true, result.output); };
   executePeer('git switch -c dev'); peer.editFile('peer.txt', '协作者未推送提交\n');
@@ -168,12 +181,20 @@ test('仓库浏览跟随身份与各自初始分支，隔离未推送提交并�
     assert.ok(f.all().some(item => item.attributes['aria-label'] === '查看文件 peer.txt'));
     assert.ok(!f.all().some(item => /查看文件 (mine|draft)\.txt/.test(item.attributes['aria-label'] || '')));
     f.view.navigate('peer.txt'); f.view.closeButton.fire('click');
+    actor = 'integrator'; f.view.open();
+    assert.equal(f.view.branchSelect.value, 'branch:main');
+    assert.match(f.view.actorBadge.textContent, /合并负责人视角/);
+    assert.ok(!f.all().some(item => /查看文件 (mine|peer|draft)\.txt/.test(item.attributes['aria-label'] || '')));
+    f.view.navigate('hello.txt'); f.view.closeButton.fire('click');
     actor = 'local'; f.view.open();
     assert.equal(f.view.model.file, 'mine.txt'); assert.equal(f.view.branchSelect.value, 'branch:mine');
     assert.ok(f.all().some(item => item.className === 'repo-line-text' && item.textContent === '我的未推送提交'));
     f.view.closeButton.fire('click'); actor = 'remote'; f.view.open();
     assert.equal(f.view.model.file, 'peer.txt'); assert.equal(f.view.branchSelect.value, 'branch:dev');
     assert.ok(f.all().some(item => item.className === 'repo-line-text' && item.textContent === '协作者未推送提交'));
+    f.view.closeButton.fire('click'); actor = 'integrator'; f.view.open();
+    assert.equal(f.view.model.file, 'hello.txt');
+    assert.equal(f.view.branchSelect.value, 'branch:main');
   });
   assert.deepEqual(f.sim.snapshot(), mineBefore); assert.deepEqual(peer.commandContext(f.sim).state, peerBefore);
 });
@@ -297,7 +318,8 @@ test('本地、远程和跟踪的文件提交说明各自更新，fetch 与 push
   assert.equal(model.read(sim.state).entries.find(entry => entry.path === 'hello.txt').lastCommit.id, 'C0');
   run(sim, 'git push');
   assert.equal(sim.state.remote.commits[local].timestamp, timestamp);
-  const result = sim.commitRemote('main', { baseId: local, tree: { ...sim.headTree(), 'hello.txt': '协作者内容\n' }, message: '远端更新说明' });
+  assert.ok(local);
+  const result = remoteCommitPush(sim, 'main', draft => draft.editFile('hello.txt', '协作者内容\n'), '远端更新说明');
   assert.equal(result.ok, true); const remote = sim.state.remote.branches.main;
   assert.equal(model.read(sim.state).entries.find(entry => entry.path === 'hello.txt').lastCommit.id, remote);
   model.selectSource('tracking', sim.state);
