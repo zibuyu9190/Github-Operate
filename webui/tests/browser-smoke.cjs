@@ -547,13 +547,22 @@ test('手机横屏保持左右双栏布局，手机竖屏将命令行置于提�
     const visual = document.querySelector('.visual-panel').getBoundingClientRect();
     const cmd = document.querySelector('.command-panel').getBoundingClientRect();
     const files = document.querySelector('.files-panel').getBoundingClientRect();
+    const stateRect = document.getElementById('file-state').getBoundingClientRect();
+    const selectRect = document.getElementById('file-select').getBoundingClientRect();
+    const overlap =
+      stateRect.left < selectRect.right &&
+      stateRect.right > selectRect.left &&
+      stateRect.top < selectRect.bottom &&
+      stateRect.bottom > selectRect.top;
     return {
       visualBottom: visual.bottom,
       cmdTop: cmd.top,
       cmdBottom: cmd.bottom,
-      filesTop: files.top
+      filesTop: files.top,
+      fileHeaderOverlap: overlap
     };
   });
   assert.ok(portrait.cmdTop >= portrait.visualBottom - 1, '竖屏下命令行应在提交图下方');
   assert.ok(portrait.filesTop >= portrait.cmdBottom - 1, '竖屏下文件区应在命令行下方');
+  assert.equal(portrait.fileHeaderOverlap, false, '竖屏下文件状态标签不能与文件下拉框重叠');
 });
