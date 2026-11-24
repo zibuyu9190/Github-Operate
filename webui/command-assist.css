@@ -221,9 +221,9 @@
 /* 新增控制栏不能挤掉文件内容；小屏三栏纵排后由内容撑高，避免最后一栏被遮住。 */
 .editing-remote .areas { flex-shrink: 0; min-height: 180px; }
 .editing-remote .area-heading { background: var(--actor-surface); }
-@media (max-width: 680px) {
+@media (max-width: 960px) {
   .files-panel.editing-remote { flex: none; }
-  .editing-remote .areas { flex: none; grid-auto-rows: minmax(180px, auto); }
+  .editing-remote .areas { flex: none; grid-auto-rows: minmax(160px, auto); }
   .remote-editor-actions input { flex-basis: 100%; font-size: 16px; }
   .remote-editor-toolbar select { font-size: 16px; }
 }

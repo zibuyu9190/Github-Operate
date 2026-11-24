@@ -1681,13 +1681,14 @@ dialog > p {
 @media (max-width: 960px) {
   body {
     height: auto;
+    min-height: 100vh;
     overflow: auto;
   }
   .app-header {
     height: auto;
     flex-wrap: wrap;
-    padding: 10px 14px;
-    gap: 10px;
+    padding: 8px 12px;
+    gap: 8px;
   }
   .header-actions {
     flex-wrap: wrap;
@@ -1698,20 +1699,11 @@ dialog > p {
     width: 100%;
   }
   .workbench {
-    grid-template-columns: 1fr;
+    flex: none;
+    grid-template-columns: minmax(0, 1fr) minmax(245px, 38%);
+    gap: 10px;
+    padding: 10px 12px;
   }
-  .visual-panel {
-    min-height: 300px;
-  }
-  .files-panel {
-    min-height: 320px;
-  }
-  .command-panel {
-    min-height: 380px;
-  }
-}
-
-@media (max-width: 680px) {
   .graph-header {
     height: auto;
     min-height: 44px;
@@ -1719,9 +1711,25 @@ dialog > p {
     gap: 6px;
     padding-block: 6px;
   }
-
   .graph-legend {
     display: none;
+  }
+  .visual-panel {
+    min-height: 260px;
+  }
+  .files-panel {
+    min-height: 320px;
+  }
+  .dock-column {
+    align-self: start;
+  }
+  .command-panel {
+    min-height: 0;
+  }
+  .command-panel.has-terminal-context .terminal {
+    flex: 0 1 auto;
+    min-height: 110px;
+    max-height: 210px;
   }
   .areas {
     grid-template-columns: 1fr;
@@ -1733,6 +1741,49 @@ dialog > p {
   }
   .conflict-versions {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 960px) and (max-height: 500px) {
+  .visual-panel {
+    min-height: 220px;
+  }
+  .command-panel.has-terminal-context .terminal {
+    min-height: 84px;
+    max-height: 130px;
+  }
+}
+
+/* 手机竖屏（< 640px）改单列，并将命令行窗口提至提交图正下方，方便边看图边输入命令。 */
+@media (max-width: 639px) {
+  .workbench {
+    grid-template-columns: 1fr;
+    padding: 8px 10px;
+    gap: 10px;
+  }
+  .stage-column,
+  .dock-column {
+    display: contents;
+  }
+  .visual-panel,
+  .transition-card,
+  .command-panel,
+  .files-panel {
+    min-width: 0;
+  }
+  .visual-panel {
+    order: 1;
+    min-height: 280px;
+  }
+  .transition-card {
+    order: 2;
+  }
+  .command-panel {
+    order: 3;
+    min-height: 360px;
+  }
+  .files-panel {
+    order: 4;
   }
 }
 

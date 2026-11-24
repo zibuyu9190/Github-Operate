@@ -516,3 +516,44 @@ test('矮窗口（1024x480）允许页面纵向滚动并可正常编辑保存文
   assert.equal(await page.locator('#editor-status').textContent(), '编辑后保存到工作区');
   assert.match(await page.locator('#file-message').textContent(), /已保存到工作区/);
 });
+
+test('手机横屏保持左右双栏布局，手机竖屏将命令行置于提交图正下方', async t => {
+  const page = await open(t, { width: 844, height: 390 });
+  const landscape = await page.evaluate(() => {
+    const stage = document.querySelector('.stage-column').getBoundingClientRect();
+    const dock = document.querySelector('.dock-column').getBoundingClientRect();
+    const visual = document.querySelector('.visual-panel').getBoundingClientRect();
+    const cmd = document.querySelector('.command-panel').getBoundingClientRect();
+    const input = document.getElementById('command').getBoundingClientRect();
+    return {
+      stageRight: stage.right,
+      dockLeft: dock.left,
+      visualTop: visual.top,
+      visualBottom: visual.bottom,
+      cmdTop: cmd.top,
+      cmdWidth: cmd.width,
+      inputTop: input.top,
+      overflowY: getComputedStyle(document.body).overflowY
+    };
+  });
+  assert.notEqual(landscape.overflowY, 'hidden');
+  assert.ok(landscape.dockLeft >= landscape.stageRight - 1, '横屏下命令行应在左侧舞台右侧');
+  assert.ok(Math.abs(landscape.visualTop - landscape.cmdTop) < 10, '横屏下提交图与命令行应顶部对齐');
+  assert.ok(landscape.cmdWidth >= 240, '横屏下命令行面板应保持可用宽度');
+  assert.ok(landscape.inputTop < landscape.visualBottom + 80, '横屏下命令输入框不应被空白终端撑到底部');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const portrait = await page.evaluate(() => {
+    const visual = document.querySelector('.visual-panel').getBoundingClientRect();
+    const cmd = document.querySelector('.command-panel').getBoundingClientRect();
+    const files = document.querySelector('.files-panel').getBoundingClientRect();
+    return {
+      visualBottom: visual.bottom,
+      cmdTop: cmd.top,
+      cmdBottom: cmd.bottom,
+      filesTop: files.top
+    };
+  });
+  assert.ok(portrait.cmdTop >= portrait.visualBottom - 1, '竖屏下命令行应在提交图下方');
+  assert.ok(portrait.filesTop >= portrait.cmdBottom - 1, '竖屏下文件区应在命令行下方');
+});
